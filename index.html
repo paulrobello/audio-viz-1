@@ -152,6 +152,14 @@
           <span id="volLbl" style="font-size:11px;color:#9aa6da;width:34px;text-align:right;">90%</span>
         </div>
       </div>
+      <div class="row" style="margin-top:9px;">
+        <button id="lookToggle">◐ look</button>
+      </div>
+      <div id="lookPanel" style="display:none; flex-direction:column; gap:7px;">
+        <label class="chk">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
+        <label class="chk">swirl <input type="range" id="lkSwirl" min="0" max="0.02" step="0.0005" value="0.004" style="width:120px;"></label>
+        <label class="chk">glow <input type="range" id="lkGlow" min="0" max="0.3" step="0.005" value="0.06" style="width:120px;"></label>
+      </div>
     </div>
   </div>
   <div></div>
@@ -185,6 +193,9 @@ uniform float u_style;
 uniform float u_mode;
 uniform float u_specOn;
 uniform float u_reducedMotion;
+uniform float u_feedback;
+uniform float u_swirl;
+uniform float u_glow;
 uniform sampler2D u_prev;
 uniform sampler2D u_spec;   // R8, 256x1 FFT magnitudes
 
@@ -353,12 +364,12 @@ void main(){
   float rm = u_reducedMotion;
   vec2 c = gl_FragCoord.xy / u_res - 0.5;
   float zoom = 1.0 - (0.0035 + u_bass*0.012);
-  float a = (0.004 + u_beat*0.02 + u_mid*0.01) * (1.0 - 0.85*rm);
+  float a = (u_swirl + u_beat*0.02 + u_mid*0.01) * (1.0 - 0.85*rm);
   c *= rot(a) * zoom;
-  float decay = mix(0.90 - u_beat*0.05, 0.15, rm);
+  float decay = mix(u_feedback - u_beat*0.05, 0.15, rm);
   vec3 trail = texture(u_prev, c + 0.5).rgb * decay;
   col = max(col, trail);
-  col += trail * 0.06 * (1.0 - rm);
+  col += trail * u_glow * (1.0 - rm);
 
   frag = vec4(col, 1.0);
 }
@@ -464,6 +475,7 @@ const U = {
   style:uni(progScene,'u_style'), mode:uni(progScene,'u_mode'),
   specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
   reducedMotion:uni(progScene,'u_reducedMotion'),
+  feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
 };
 const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 
@@ -652,6 +664,9 @@ let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matche
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0;
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
+// look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
+const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
+let look; try{ look=Object.assign({}, LOOK_DEFAULT, JSON.parse(localStorage.getItem('resomance_look')||'{}')); }catch(e){ look=Object.assign({}, LOOK_DEFAULT); }
 // persisted look settings (volume is persisted separately in its own handler)
 let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
 let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=3)?s:0; })();
@@ -679,6 +694,7 @@ function frame(now){
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.mode,curMode);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
+  gl.uniform1f(U.feedback, look.feedback); gl.uniform1f(U.swirl, look.swirl); gl.uniform1f(U.glow, look.glow);
   gl.drawArrays(gl.TRIANGLES,0,3);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
@@ -797,6 +813,12 @@ volSlider.addEventListener('input', e=>{
   volLbl.textContent=Math.round(v*100)+'%';
   localStorage.setItem('resomance_vol', String(v));
 });
+// look panel: feedback / swirl / glow sliders, persisted like volume
+const lookToggle=document.getElementById('lookToggle'), lookPanel=document.getElementById('lookPanel');
+lookToggle.addEventListener('click', ()=> lookPanel.style.display = lookPanel.style.display==='none'?'flex':'none');
+function bindLook(id,key){ const el=document.getElementById(id); el.value=look[key];
+  el.addEventListener('input', e=>{ look[key]=parseFloat(e.target.value); localStorage.setItem('resomance_look', JSON.stringify(look)); }); }
+bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow','glow');
 // keyboard
 window.addEventListener('keydown', e=>{
   if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
