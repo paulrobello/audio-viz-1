@@ -16,7 +16,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 - [x] **Persist scene, palette & ring across reloads** — Volume already persists via `localStorage`; extend it to remember last scene, palette, ring toggle, and idle-hide so reloads resume the exact look. (effort: small)
 
 ## Capture & presentation
-- [ ] **Screenshot hotkey (PNG)** — `S` key grabs the current rendered frame straight off the canvas to a PNG download. (effort: small)
+- [x] **Screenshot hotkey (PNG)** — `S` key grabs the current rendered frame straight off the canvas to a PNG download. (effort: small)
 - [ ] **Fullscreen mode** — `F` key toggles the Fullscreen API for clean projector/stage presentation. (effort: small)
 - [ ] **PWA: installable + offline** — Add a web manifest and a tiny service worker so the (already self-contained, dependency-free) app installs and runs fully offline. (effort: medium)
 - [ ] **Open Graph / share metadata** — Add OG/Twitter tags and a preview image so links render richly when shared. (effort: small)

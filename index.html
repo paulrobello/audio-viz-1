@@ -47,6 +47,11 @@
     color:#9aa6da; font-size:11px; letter-spacing:.1em; opacity:0; pointer-events:none;
     text-align:center; transition: opacity .4s ease; }
   #hint.show { opacity:.7; }
+  #toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+    background: rgba(8,10,18,.72); border:1px solid rgba(150,180,255,.3); color:#dfe6ff;
+    padding:8px 14px; border-radius:10px; font-size:12px; letter-spacing:.06em;
+    opacity:0; transition: opacity .25s ease; pointer-events:none; z-index:45; white-space:nowrap; }
+  #toast.show { opacity:.95; }
   /* hidden HUD must not intercept clicks (e.g. after the idle fade-out) */
   #ui:not(.show) * { pointer-events: none; }
   #err {
@@ -129,6 +134,7 @@
 </div>
 
 <div id="hint">press <b>H</b> hide UI · drag an audio file anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>R</b> ring</div>
+<div id="toast"></div>
 <div id="drop">drop an audio file to visualize</div>
 <div id="err"></div>
 
@@ -586,6 +592,7 @@ function analyze(){
 let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0;
+let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // persisted look settings (volume is persisted separately in its own handler)
 let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
 let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=3)?s:0; })();
@@ -621,6 +628,11 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texB);
   gl.uniform1i(UC.tex,0); gl.uniform2f(UC.res,W,H);
   gl.drawArrays(gl.TRIANGLES,0,3);
+  if(pendingShot){ pendingShot=false;   // capture right after the copy pass so the buffer is valid
+    canvas.toBlob(b=>{ if(!b) return; const a=document.createElement('a');
+      a.href=URL.createObjectURL(b); a.download='resomance-'+Date.now()+'.png';
+      a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }, 'image/png');
+    toast('screenshot saved'); }
 
   let t2=texA; texA=texB; texB=t2; let f2=fboA; fboA=fboB; fboB=f2;
   if(now-lastUI>50){ lastUI=now; updateMeters(); }
@@ -642,7 +654,9 @@ function updateMeters(){
 }
 
 // ---------- CONTROLS ----------
-const ui=document.getElementById('ui'), hintEl=document.getElementById('hint');
+const ui=document.getElementById('ui'), hintEl=document.getElementById('hint'), toastEl=document.getElementById('toast');
+let toastTimer=null;
+function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1400); }
 // idle fade: hide the HUD after 10s of inactivity, reveal on any input
 const IDLE_MS=10000;
 let idleTimer=null;
@@ -701,6 +715,7 @@ window.addEventListener('keydown', e=>{
   }
   if(e.key>='1'&&e.key<='4') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
+  if(e.key==='s'||e.key==='S') pendingShot=true;
   poke();   // any other key counts as activity
 });
 
