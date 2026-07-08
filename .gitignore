@@ -1,0 +1,38 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.local
+*.local.*
+*-mcp.json
+
+# Logs and runtime output
+*.log
+*.pid
+*.seed
+*.tmp
+tmp/
+temp/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Agent / tool local state (not project source)
+.claude/
+.superpowers/
+.gemini/
+claude_scratch/
+
+# Web / build artifacts
+node_modules/
+dist/
+build/
+.next/
+.cache/
+coverage/
