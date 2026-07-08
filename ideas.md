@@ -34,5 +34,5 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 
 ## UX, performance & accessibility
 - [ ] **Render-scale / quality toggle + FPS meter** — Expose a Low/Med/High quality control (DPR cap and raymarch step counts are currently hardcoded) and an optional debug FPS counter so it runs on lower-end GPUs. (effort: medium)
-- [ ] **`prefers-reduced-motion` mode** — Respect the OS reduced-motion setting by slowing/disabling the heavy swirl, feedback trails, and beat flashes for accessibility. (effort: small)
+- [x] **`prefers-reduced-motion` mode** — Respect the OS reduced-motion setting by slowing/disabling the heavy swirl, feedback trails, and beat flashes for accessibility. (effort: small)
 - [ ] **Keyboard cheat-sheet overlay** — `?` opens a clean overlay listing every shortcut (scenes, play/pause, ring, fullscreen, screenshot) since today hints are only in a fading footer. (effort: small)

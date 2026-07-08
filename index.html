@@ -154,6 +154,7 @@ uniform float u_beat;
 uniform float u_style;
 uniform float u_mode;
 uniform float u_specOn;
+uniform float u_reducedMotion;
 uniform sampler2D u_prev;
 uniform sampler2D u_spec;   // R8, 256x1 FFT magnitudes
 
@@ -318,14 +319,16 @@ void main(){
     col += palette(af + u_time*0.05) * smoothstep(0.007,0.0,abs(d)) * 0.7; // base ring
   }
 
-  // feedback trails (phosphor persistence + swirl)
+  // feedback trails (phosphor persistence + swirl); damped under reduced-motion
+  float rm = u_reducedMotion;
   vec2 c = gl_FragCoord.xy / u_res - 0.5;
   float zoom = 1.0 - (0.0035 + u_bass*0.012);
-  float a = 0.004 + u_beat*0.02 + u_mid*0.01;
+  float a = (0.004 + u_beat*0.02 + u_mid*0.01) * (1.0 - 0.85*rm);
   c *= rot(a) * zoom;
-  vec3 trail = texture(u_prev, c + 0.5).rgb * (0.90 - u_beat*0.05);
+  float decay = mix(0.90 - u_beat*0.05, 0.15, rm);
+  vec3 trail = texture(u_prev, c + 0.5).rgb * decay;
   col = max(col, trail);
-  col += trail * 0.06;
+  col += trail * 0.06 * (1.0 - rm);
 
   frag = vec4(col, 1.0);
 }
@@ -430,6 +433,7 @@ const U = {
   centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'),
   style:uni(progScene,'u_style'), mode:uni(progScene,'u_mode'),
   specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
+  reducedMotion:uni(progScene,'u_reducedMotion'),
 };
 const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 
@@ -578,6 +582,9 @@ function analyze(){
 }
 
 // ---------- RENDER ----------
+// accessibility: respect OS reduced-motion (calm swirl, trails, and beat flashes)
+let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0;
 // persisted look settings (volume is persisted separately in its own handler)
 let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
@@ -602,9 +609,10 @@ function frame(now){
   gl.uniform2f(U.res,W,H); gl.uniform1f(U.time,time);
   gl.uniform1f(U.bass,bands.bass); gl.uniform1f(U.mid,bands.mid);
   gl.uniform1f(U.treble,bands.treble); gl.uniform1f(U.level,bands.level);
-  gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat,beat);
+  gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.mode,curMode);
   gl.uniform1f(U.specOn, ringOn?1:0);
+  gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
   gl.drawArrays(gl.TRIANGLES,0,3);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
