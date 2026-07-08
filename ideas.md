@@ -24,7 +24,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 ## Scenes & look
 - [x] **Auto-mix / scene cycling** — Optionally crossfade or cut between scenes on beat boundaries (or a timer) so long sessions stay dynamic. Needs a blend mode in the shader or a smooth lerp between two rendered scenes. (effort: large)
 - [x] **Adjustable feedback & look controls** — Expose currently hardcoded constants — feedback decay (`0.90`), swirl angle, glow/zoom — as sliders in a collapsible "look" panel, persisted like volume. (effort: medium)
-- [ ] **Bloom post-process pass** — Insert a bright-pass + blur bloom pass between the scene and copy shaders for punchier glow on bright hits, intensified on beats. (effort: large)
+- [x] **Bloom post-process pass** — Insert a bright-pass + blur bloom pass between the scene and copy shaders for punchier glow on bright hits, intensified on beats. (effort: large)
 - [x] **Custom palette editor** — Let users edit the cosine-palette `a/b/c/d` vectors with color pickers and save their own palette to `localStorage`, beyond the four built-ins. (effort: medium)
 - [ ] **Orbit camera for the raymarch scenes** — Mouse-drag to orbit/pan the Fractal (and Tunnel) camera so users can explore the field interactively instead of the fixed auto-camera. (effort: large)
 
