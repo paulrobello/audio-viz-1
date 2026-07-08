@@ -154,6 +154,7 @@
           <button data-mode="2">Plasma</button>
           <button data-mode="3">Vortex</button>
         </div>
+        <label class="chk"><input type="checkbox" id="autoMix" /> auto-mix</label>
       </div>
       <div class="row" style="margin-bottom:9px;">
         <span class="label">palette</span>
@@ -250,7 +251,9 @@ uniform float u_snare;
 uniform float u_hat;
 uniform float u_paletteShift;
 uniform float u_style;
-uniform float u_mode;
+uniform float u_modeA;
+uniform float u_modeB;
+uniform float u_blend;
 uniform float u_specOn;
 uniform float u_reducedMotion;
 uniform float u_feedback;
@@ -402,14 +405,19 @@ vec3 sceneVortex(vec2 uv){
   return c * (0.7 + u_level*0.8);
 }
 
+vec3 sceneById(float id, vec2 uv){
+  if(id < 0.5)      return sceneFractal(uv);
+  else if(id < 1.5) return sceneTunnel(uv);
+  else if(id < 2.5) return scenePlasma(uv);
+  else              return sceneVortex(uv);
+}
+
 void main(){
   vec2 uv = (gl_FragCoord.xy - 0.5*u_res) / u_res.y;
 
-  vec3 col;
-  if(u_mode < 0.5)      col = sceneFractal(uv);
-  else if(u_mode < 1.5) col = sceneTunnel(uv);
-  else if(u_mode < 2.5) col = scenePlasma(uv);
-  else                  col = sceneVortex(uv);
+  // crossfade between two scenes; only the second is evaluated during a transition
+  vec3 colA = sceneById(u_modeA, uv);
+  vec3 col  = (u_blend <= 0.001) ? colA : mix(colA, sceneById(u_modeB, uv), u_blend);
 
   // snare / hat onset accents (spectral-flux onsets) for richer reactivity
   col += palette(u_time*0.15 + 0.2) * u_snare * 0.10;
@@ -546,7 +554,7 @@ const U = {
   treble:uni(progScene,'u_treble'), level:uni(progScene,'u_level'),
   centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'),
   snare:uni(progScene,'u_snare'), hat:uni(progScene,'u_hat'),
-  style:uni(progScene,'u_style'), mode:uni(progScene,'u_mode'),
+  style:uni(progScene,'u_style'), modeA:uni(progScene,'u_modeA'), modeB:uni(progScene,'u_modeB'), blend:uni(progScene,'u_blend'),
   specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
   reducedMotion:uni(progScene,'u_reducedMotion'),
   feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
@@ -770,6 +778,12 @@ let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10
 let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=4)?s:0; })();
 let ringOn = localStorage.getItem('resomance_ring') !== '0';
 let autoHide = localStorage.getItem('resomance_autohide') !== '0';
+// scene crossfade + auto-mix state (declared after curMode to avoid a TDZ on the modeA initializer)
+const AUTO_MIX_INTERVAL=14, AUTO_MIX_DUR=0.7;
+let modeA=curMode, modeB=curMode, blend=0;
+let autoMixOn = localStorage.getItem('resomance_automix')==='1';
+let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null;
+function clockSec(){ return (performance.now()-t0)/1000; }
 function frame(now){
   const time=(now-t0)/1000;
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
@@ -780,6 +794,12 @@ function frame(now){
     if(beatTimes.length>=4){ const iv=[]; for(let i=1;i<beatTimes.length;i++) iv.push(beatTimes[i]-beatTimes[i-1]); iv.sort((a,b)=>a-b); const med=iv[Math.floor(iv.length/2)]; if(med>0.3&&med<2.0) bpm=Math.round(60/med); } }
   prevBeat=beat;
   if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + bands.level*0.16);
+  // auto-mix: crossfade to the next scene on a timer
+  if(autoMixOn){
+    if(!mixTrans && time>=autoMixNext){ const to=(curMode+1)%4; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; }
+    if(mixTrans){ const k=Math.min(1,(time-mixTrans.start)/AUTO_MIX_DUR); blend=k;
+      if(k>=1){ curMode=mixTrans.to; modeA=modeB=curMode; blend=0; mixTrans=null; autoMixNext=time+AUTO_MIX_INTERVAL; applyModeUI(); } }
+  }
 
   // upload spectrum
   gl.bindTexture(gl.TEXTURE_2D, specTex);
@@ -798,7 +818,7 @@ function frame(now){
   gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
   gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
   gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
-  gl.uniform1f(U.style,curStyle); gl.uniform1f(U.mode,curMode);
+  gl.uniform1f(U.style,curStyle); gl.uniform1f(U.modeA,modeA); gl.uniform1f(U.modeB,modeB); gl.uniform1f(U.blend,blend);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
   gl.uniform1f(U.feedback, look.feedback); gl.uniform1f(U.swirl, look.swirl); gl.uniform1f(U.glow, look.glow);
@@ -898,9 +918,8 @@ nextBtn.addEventListener('click', nextTrack);
 function updateTrackCounter(){ const multi=playlist.length>1; trackCountEl.textContent = multi ? (curIdx+1)+' / '+playlist.length : ''; prevBtn.disabled=nextBtn.disabled=!multi; }
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
-function setMode(m){ curMode=m;
-  [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===m));
-  localStorage.setItem('resomance_scene', String(m)); }
+function applyModeUI(){ [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode)); }
+function setMode(m){ curMode=m; modeA=modeB=m; blend=0; mixTrans=null; applyModeUI(); localStorage.setItem('resomance_scene', String(m)); if(autoMixOn) autoMixNext=clockSec()+AUTO_MIX_INTERVAL; }
 modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(b) setMode(parseInt(b.dataset.mode,10)); });
 // palette
 const styleSel=document.getElementById('style');
@@ -915,8 +934,13 @@ ringChk.addEventListener('change', e=> setRing(e.target.checked));
 // auto-hide HUD toggle
 const autohideChk=document.getElementById('autohide');
 autohideChk.addEventListener('change', e=>{ autoHide=e.target.checked; localStorage.setItem('resomance_autohide', autoHide?'1':'0'); if(!autoHide) showUI(); });
+// auto-mix scene cycling (crossfade to next scene on a timer)
+const autoMixChk=document.getElementById('autoMix');
+autoMixChk.checked=autoMixOn;
+autoMixChk.addEventListener('change', e=>{ autoMixOn=e.target.checked; localStorage.setItem('resomance_automix', autoMixOn?'1':'0');
+  if(autoMixOn){ mixTrans=null; autoMixNext=clockSec()+AUTO_MIX_INTERVAL; } else { modeA=modeB=curMode; blend=0; mixTrans=null; } });
 // sync UI to persisted look on load
-[...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode));
+applyModeUI();
 styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide; syncPalEditor();
 // volume
 const volSlider=document.getElementById('vol'), volLbl=document.getElementById('volLbl');
