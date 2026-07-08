@@ -76,6 +76,19 @@
     padding:8px 14px; border-radius:10px; font-size:12px; letter-spacing:.06em;
     opacity:0; transition: opacity .25s ease; pointer-events:none; z-index:45; white-space:nowrap; }
   #toast.show { opacity:.95; }
+  #help { position: fixed; inset:0; display:none; align-items:center; justify-content:center;
+    background: rgba(0,0,0,.6); backdrop-filter: blur(6px); z-index:60; }
+  #help.show { display:flex; }
+  #help .box { pointer-events:auto; background: rgba(8,10,18,.92); border:1px solid rgba(150,180,255,.25);
+    border-radius:14px; padding:20px 24px; color:#cdd6ff; font-size:13px; max-width:460px; box-shadow:0 12px 60px rgba(0,0,0,.6); }
+  #help h2 { font-size:12px; letter-spacing:.18em; color:#aebeff; margin-bottom:14px; font-weight:700; }
+  #help table { border-collapse:collapse; width:100%; }
+  #help td { padding:5px 0; vertical-align:top; }
+  #help td.k { width:96px; white-space:nowrap; }
+  #help td.k b { background:rgba(110,140,255,.18); border:1px solid rgba(150,180,255,.3); border-radius:5px; padding:1px 7px; font:inherit; font-size:12px; color:#eaf0ff; }
+  #help .note { margin-top:14px; color:#8a96c8; font-size:11px; line-height:1.5; }
+  #help .esc { margin-top:12px; text-align:right; color:#7f8bc0; font-size:11px; }
+  #help .esc b { color:#cdd6ff; }
   /* hidden HUD must not intercept clicks (e.g. after the idle fade-out) */
   #ui:not(.show) * { pointer-events: none; }
   #err {
@@ -194,8 +207,23 @@
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · drag audio files/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot</div>
+<div id="hint">press <b>H</b> hide UI · drag audio files/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
 <div id="toast"></div>
+<div id="help"><div class="box">
+  <h2>R E S O M A N C E — shortcuts</h2>
+  <table>
+    <tr><td class="k"><b>Space</b></td><td>play / pause</td></tr>
+    <tr><td class="k"><b>H</b></td><td>toggle HUD</td></tr>
+    <tr><td class="k"><b>1</b>–<b>4</b></td><td>scene: Fractal / Tunnel / Plasma / Vortex</td></tr>
+    <tr><td class="k"><b>←</b>/<b>→</b></td><td>previous / next track</td></tr>
+    <tr><td class="k"><b>R</b></td><td>spectrum ring</td></tr>
+    <tr><td class="k"><b>F</b></td><td>fullscreen</td></tr>
+    <tr><td class="k"><b>S</b></td><td>screenshot (PNG)</td></tr>
+    <tr><td class="k"><b>?</b></td><td>this cheat sheet</td></tr>
+  </table>
+  <div class="note">Drop audio files or a folder anywhere to load a full set. The on-screen panel also exposes quality, palette, the look controls, and a custom palette editor.</div>
+  <div class="esc">press <b>?</b> or <b>Esc</b> to close</div>
+</div></div>
 <div id="drop">drop an audio file to visualize</div>
 <div id="err"></div>
 
@@ -820,6 +848,9 @@ function toggleFullscreen(){
     if(rq){ try{ const p=rq.call(document.documentElement); if(p&&p.catch) p.catch(()=>{}); toast('fullscreen'); }catch(e){} } }
   else { const ex=document.exitFullscreen||document.webkitExitFullscreen; if(ex){ try{ ex.call(document); toast('windowed'); }catch(e){} } }
 }
+const helpEl=document.getElementById('help');
+function toggleHelp(force){ helpEl.classList.toggle('show', force!==undefined?force:!helpEl.classList.contains('show')); }
+helpEl.addEventListener('click', e=>{ if(e.target===helpEl) toggleHelp(false); });   // backdrop click closes
 // idle fade: hide the HUD after 10s of inactivity, reveal on any input
 const IDLE_MS=10000;
 let idleTimer=null;
@@ -921,6 +952,9 @@ beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
 beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
 // keyboard
 window.addEventListener('keydown', e=>{
+  if(e.key==='?'){ toggleHelp(); return; }
+  if(e.key==='Escape' && helpEl.classList.contains('show')){ toggleHelp(false); return; }
+  if(helpEl.classList.contains('show')) return;   // modal: swallow other keys while the cheat sheet is open
   if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
   if(e.key==='h'||e.key==='H'){
     // manual toggle: hide now and stay hidden until the next pointer/key activity
