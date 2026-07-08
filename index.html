@@ -249,6 +249,7 @@ uniform float u_centroid;
 uniform float u_beat;
 uniform float u_snare;
 uniform float u_hat;
+uniform float u_shock;   // 0 at the instant of a beat, rises to 1 as the shockwave expands/fades
 uniform float u_paletteShift;
 uniform float u_style;
 uniform float u_modeA;
@@ -350,32 +351,86 @@ vec3 sceneFractal(vec2 uv){
   return col;
 }
 
-// ---------- scene 1: hyperdrive tunnel ----------
+// ---------- scene 1: epic hyperspace warp tunnel ----------
+// centerline of a serpentine, coiling bore; the camera rides the inside of it
+vec2 tunnelCenter(float s){
+  float cf = 0.16 + u_mid*0.10;          // coiling rate (speeds up with mids)
+  float ca = 0.40 + u_bass*0.30;         // coil amplitude (gentle bend so the receding walls stay visible)
+  vec2 c = vec2(sin(s*cf), cos(s*cf)) * ca;
+  float sCam = u_time*4.0;               // keep the camera on the centerline
+  vec2 c0 = vec2(sin(sCam*cf), cos(sCam*cf)) * ca;
+  return c - c0;
+}
+// signed distance to the ribbed tube wall (>0 inside the bore)
+float tunnelD(vec3 p){
+  float s = p.z + u_time*4.0;            // fly forward
+  vec2 q = p.xy - tunnelCenter(s);
+  float ang = atan(q.y, q.x);
+  float baseR = 1.6 + 0.22*sin(s*2.0 + u_time) + u_bass*0.6;                       // breathing radius
+  float flutes = 0.10*sin(ang*24.0 + s*4.0 + u_time*2.0) * (0.5 + u_bass);         // spiral flutes down the wall
+  return (baseR + flutes) - length(q);
+}
 vec3 sceneTunnel(vec2 uv){
-  vec3 ro = vec3(sin(u_time*0.5)*0.3, cos(u_time*0.37)*0.3, 0.0) * (0.5 + u_bass);
+  vec3 ro = vec3(0.0);
   vec3 rd = normalize(vec3(uv, 1.3));
   if(u_orbit > 0.5){ rd.yz *= rot(u_camPitch*0.6); rd.xz *= rot(u_camYaw*0.6); }   // look around while flying
-  float t = 0.0, glow = 0.0; bool hit = false; vec3 p = vec3(0.0);
+
+  float t = 0.0, glow = 0.0, shaft = 0.0; bool hit = false; vec3 p = vec3(0.0);
+  float hitS = 0.0, hitAng = 0.0;
   for(int i=0;i<120;i++){
     if(i>=u_rmSteps) break;
     p = ro + rd*t;
-    p.z += u_time*4.0;                 // fly forward
-    float R = 1.6 + 0.25*sin(p.z*2.0 + u_time) + u_bass*0.6;
-    float d = R - length(p.xy);        // >0 inside, <0 past wall
-    glow += exp(-max(d,0.0)*3.0)*0.012 + exp(-abs(d)*9.0)*0.006;
-    if(d < 0.02){ hit = true; break; }
+    float s = p.z + u_time*4.0;
+    float d = tunnelD(p);
+    glow  += exp(-max(d,0.0)*3.0)*0.003 + exp(-abs(d)*9.0)*0.0015;
+    vec2 q = p.xy - tunnelCenter(s);
+    shaft += exp(-max(length(q),0.0)*2.4) * 0.003 * (0.15 + u_level*0.6); // faint light gathering near the axis
+    if(d < 0.02){ hit = true; hitS = s; hitAng = atan(q.y, q.x); break; }
     t += max(d*0.9, 0.015);
     if(t > 40.0) break;
   }
+
   vec3 col = vec3(0.0);
+  float calm = 1.0 - 0.8*u_reducedMotion;   // still the streaks + shockwave under reduced-motion
   if(hit){
-    float ring = sin(p.z*1.5 + u_time*2.0)*0.5+0.5;
-    vec3 base = palette(p.z*0.05 + u_time*0.06 + u_centroid);
-    col = base*(0.25 + ring*0.85);
-    col += palette(u_time*0.1) * u_treble * 0.5;
-    col *= exp(-t*0.06);
+    vec2 e = vec2(0.0028, 0.0);
+    vec3 nout = normalize(vec3(                                       // wall normal from the SDF gradient
+      tunnelD(p+e.xyy) - tunnelD(p-e.xyy),
+      tunnelD(p+e.yxy) - tunnelD(p-e.yxy),
+      tunnelD(p+e.yyx) - tunnelD(p-e.yyx) ));
+    vec3 nin = -nout;                                                 // normal facing the camera (inside the bore)
+    vec3 lig = normalize(vec3(0.1, 0.25, -0.7));
+    float dif = clamp(dot(nin, lig), 0.0, 1.0);
+    float fre = pow(1.0 - clamp(dot(nin, -rd), 0.0, 1.0), 5.0);       // fresnel rim (concentrated on silhouettes)
+    vec3 base = palette(hitS*0.05 + u_time*0.06 + u_centroid);
+    float ring = 0.5 + 0.5*sin(hitS*1.5 + u_time*2.0);
+    vec3 w = base*(0.12 + ring*0.32);                                 // ribbed base wall
+    w += palette(u_time*0.1) * u_treble * 0.25;
+    w *= (0.40 + 0.80*dif);                                           // key light catches the ribs
+    w += fre * palette(u_time*0.15 + 0.5) * (0.10 + u_bass*0.25 + u_treble*0.3); // fresnel rim glow
+    // neon energy grooves: bright seams along the flutes + rings around the bore
+    float neon = pow(0.5 + 0.5*sin(hitAng*24.0 + hitS*4.0 + u_time*2.0), 8.0);
+    float seam = pow(0.5 + 0.5*sin(hitS*1.5), 6.0);
+    w += neon * palette(u_time*0.2 + 0.3) * (0.5 + u_treble*1.1 + u_beat*0.9);
+    w += seam * palette(u_centroid + 0.2) * (0.18 + u_beat*0.7);
+    col = w * exp(-t*0.12);                                           // fade EVERYTHING into depth so the bore recedes to black
   }
-  col += glow * palette(u_time*0.2 + 0.4) * (1.0 + u_bass*1.5);
+
+  // light-speed streaks: bright radial spokes rushing past (feedback trails smear them outward into warp lines)
+  float viewAng = atan(rd.y, rd.x);
+  float streak = pow(0.5 + 0.5*sin(viewAng*30.0 + u_time*6.0), 12.0);
+  col += streak * palette(u_time*0.3) * (0.05 + u_level*0.25 + u_bass*0.2) * (0.3 + 0.7*exp(-length(uv))) * calm;
+
+  // beat shockwave: a ring blasting outward from the camera and fading
+  float rr = length(uv);
+  float shockR = u_shock * 1.35;
+  float sw = smoothstep(0.05, 0.0, abs(rr - shockR));
+  col += sw * palette(u_time*0.2 + 0.5) * (1.0 - u_shock) * 1.3 * calm;
+
+  // volumetric god-ray shafts pouring down the bore
+  col += shaft * palette(u_centroid + u_time*0.05) * 0.15 * (1.0 + u_beat*0.5);
+
+  col += glow * palette(u_time*0.2 + 0.4) * (0.7 + u_bass*0.5);
   return col;
 }
 
@@ -598,7 +653,7 @@ const U = {
   res:uni(progScene,'u_res'), time:uni(progScene,'u_time'),
   bass:uni(progScene,'u_bass'), mid:uni(progScene,'u_mid'),
   treble:uni(progScene,'u_treble'), level:uni(progScene,'u_level'),
-  centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'),
+  centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'), shock:uni(progScene,'u_shock'),
   snare:uni(progScene,'u_snare'), hat:uni(progScene,'u_hat'),
   style:uni(progScene,'u_style'), modeA:uni(progScene,'u_modeA'), modeB:uni(progScene,'u_modeB'), blend:uni(progScene,'u_blend'),
   camYaw:uni(progScene,'u_camYaw'), camPitch:uni(progScene,'u_camPitch'), orbit:uni(progScene,'u_orbit'),
@@ -808,7 +863,7 @@ function analyze(){
 let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0, lastFrame=0, fpsEMA=0;
-let bpm=0, paletteShift=0, prevBeat=0; const beatTimes=[];   // beat-aware palette shift
+let bpm=0, paletteShift=0, prevBeat=0, shockStart=-10; const beatTimes=[];   // beat-aware palette shift + shockwave origin
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
@@ -841,7 +896,7 @@ function frame(now){
   if(dt>0){ const inst=1000/dt; fpsEMA = fpsEMA? fpsEMA*0.9+inst*0.1 : inst; }
   analyze(); resize();
   // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
-  if(beat>prevBeat+0.5){ beatTimes.push(time); if(beatTimes.length>12) beatTimes.shift();
+  if(beat>prevBeat+0.5){ beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
     if(beatTimes.length>=4){ const iv=[]; for(let i=1;i<beatTimes.length;i++) iv.push(beatTimes[i]-beatTimes[i-1]); iv.sort((a,b)=>a-b); const med=iv[Math.floor(iv.length/2)]; if(med>0.3&&med<2.0) bpm=Math.round(60/med); } }
   prevBeat=beat;
   if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + bands.level*0.16);
@@ -867,6 +922,7 @@ function frame(now){
   gl.uniform1f(U.bass,bands.bass); gl.uniform1f(U.mid,bands.mid);
   gl.uniform1f(U.treble,bands.treble); gl.uniform1f(U.level,bands.level);
   gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
+  gl.uniform1f(U.shock, reducedMotion?Math.min(1,(time-shockStart)/0.6)*0.15:Math.min(1,(time-shockStart)/0.6));
   gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
   gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.modeA,modeA); gl.uniform1f(U.modeB,modeB); gl.uniform1f(U.blend,blend);
