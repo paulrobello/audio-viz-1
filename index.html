@@ -114,6 +114,11 @@
         <button id="demo">▶ Demo synth</button>
         <button id="play">⏸ Pause</button>
       </div>
+      <div class="row" id="seekRow" style="margin-bottom:9px; display:none;">
+        <span id="curTime" class="label" style="width:42px;text-align:right;">0:00</span>
+        <input type="range" id="seek" min="0" max="1000" step="1" value="0" style="width:210px;" />
+        <span id="totTime" class="label" style="width:42px;">0:00</span>
+      </div>
       <div class="row" style="margin-bottom:9px;">
         <span class="label">scene</span>
         <div class="seg" id="modeSeg">
@@ -462,6 +467,7 @@ const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 // ---------- AUDIO ----------
 let audioCtx=null, analyser=null, freq=null, masterVol=null;
 let srcNode=null, demoNodes=null, playing=true, isDemo=false;
+let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
 let bassAvg=0.0001, beat=0;
 
@@ -526,11 +532,13 @@ function playFile(file){
   const reader = new FileReader();
   reader.onload = () => {
     audioCtx.decodeAudioData(reader.result.slice(0)).then(buf=>{
+      curBuffer=buf; trackDur=buf.duration; startCtxTime=audioCtx.currentTime;
       srcNode = audioCtx.createBufferSource();
       srcNode.buffer = buf; srcNode.loop = true;
       srcNode.connect(analyser);
       srcNode.start(); playing=true; isDemo=false; updatePlayBtn();
       setTrackName(file.name);
+      showSeek(true);
       idbSaveAudio(file);   // persist for next load
     }).catch(e=> fatal('Could not decode audio: '+e.message));
   };
@@ -578,6 +586,7 @@ function startDemo(){
   const timerKiller={ stop(){ clearInterval(arpTimer); }, disconnect(){} };
   demoNodes=[...oscs, noise, lfo, baseG, arp, sweepLfo, timerKiller];
   isDemo=true; playing=true; updatePlayBtn();
+  curBuffer=null; showSeek(false);   // demo has no finite timeline
 }
 
 function analyze(){
@@ -651,7 +660,7 @@ function frame(now){
     toast('screenshot saved'); }
 
   let t2=texA; texA=texB; texB=t2; let f2=fboA; fboA=fboB; fboB=f2;
-  if(now-lastUI>50){ lastUI=now; updateMeters(); }
+  if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -696,6 +705,29 @@ playBtn.addEventListener('click', ()=>{
   if(playing){ audioCtx.suspend(); playing=false; } else { audioCtx.resume(); playing=true; }
   updatePlayBtn();
 });
+// ---------- transport: seek bar (file playback only) ----------
+const seekRow=document.getElementById('seekRow'), seekEl=document.getElementById('seek'),
+      curTimeEl=document.getElementById('curTime'), totTimeEl=document.getElementById('totTime');
+function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
+  return (h>0? h+':'+String(m).padStart(2,'0') : String(m))+':'+String(sec).padStart(2,'0'); }
+function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(trackDur); }
+// jump to frac (0..1) of the buffer by recreating the source at that offset
+function seekTo(frac){
+  if(!curBuffer||!audioCtx) return;
+  const off=Math.max(0,Math.min(frac,0.999))*trackDur;
+  try{ if(srcNode){ srcNode.stop(); srcNode.disconnect(); } }catch(e){}
+  srcNode=audioCtx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop=true; srcNode.connect(analyser);
+  startCtxTime=audioCtx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
+  srcNode.start(0, off);
+}
+function updateSeek(){
+  if(!curBuffer||!audioCtx||seeking) return;
+  const el=(audioCtx.currentTime-startCtxTime)%trackDur;
+  seekEl.value=String(Math.round(el/trackDur*1000));
+  curTimeEl.textContent=fmtTime(el);
+}
+seekEl.addEventListener('input', ()=>{ seeking=true; if(curBuffer) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*trackDur); });
+seekEl.addEventListener('change', ()=>{ if(curBuffer) seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
 function setMode(m){ curMode=m;
