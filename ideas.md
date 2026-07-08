@@ -19,7 +19,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 - [x] **Screenshot hotkey (PNG)** — `S` key grabs the current rendered frame straight off the canvas to a PNG download. (effort: small)
 - [x] **Fullscreen mode** — `F` key toggles the Fullscreen API for clean projector/stage presentation. (effort: small)
 - [x] **PWA: installable + offline** — Add a web manifest and a tiny service worker so the (already self-contained, dependency-free) app installs and runs fully offline. (effort: medium)
-- [ ] **Open Graph / share metadata** — Add OG/Twitter tags and a preview image so links render richly when shared. (effort: small)
+- [x] **Open Graph / share metadata** — Add OG/Twitter tags and a preview image so links render richly when shared. (effort: small)
 
 ## Scenes & look
 - [x] **Auto-mix / scene cycling** — Optionally crossfade or cut between scenes on beat boundaries (or a timer) so long sessions stay dynamic. Needs a blend mode in the shader or a smooth lerp between two rendered scenes. (effort: large)
