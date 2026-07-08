@@ -9,7 +9,7 @@ Commit all work after marking an idea done.
 Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of audio-input, capture, scene/look, transport, performance, and packaging work. Effort is rough.
 
 ## Audio sources
-- [ ] **Playlist & next/previous** — Accept multiple files or a dropped folder, build a queue, and add skip-forward/back controls (and `←`/`→` keys) so a full set can run without manual reloads. (effort: medium)
+- [x] **Playlist & next/previous** — Accept multiple files or a dropped folder, build a queue, and add skip-forward/back controls (and `←`/`→` keys) so a full set can run without manual reloads. (effort: medium)
 
 ## Transport & playback
 - [x] **Seek bar + elapsed/remaining time** — Show a scrubable progress bar with current/total time for file playback; today audio loops silently with no transport UI. Requires tracking the `BufferSource` playback offset. (effort: medium)

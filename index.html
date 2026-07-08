@@ -113,6 +113,9 @@
         <label class="btn" for="file">⤓ Load audio</label>
         <button id="demo">▶ Demo synth</button>
         <button id="play">⏸ Pause</button>
+        <button id="prev" title="previous (←)">⏮</button>
+        <button id="next" title="next (→)">⏭</button>
+        <span id="trackCount" class="label" style="margin-left:4px;"></span>
       </div>
       <div class="row" id="seekRow" style="margin-bottom:9px; display:none;">
         <span id="curTime" class="label" style="width:42px;text-align:right;">0:00</span>
@@ -154,12 +157,12 @@
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · drag an audio file anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot</div>
+<div id="hint">press <b>H</b> hide UI · drag audio files/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot</div>
 <div id="toast"></div>
 <div id="drop">drop an audio file to visualize</div>
 <div id="err"></div>
 
-<input type="file" id="file" accept="audio/*" />
+<input type="file" id="file" accept="audio/*" multiple />
 
 <script type="x-shader/x-vertex" id="vs">#version 300 es
 in vec2 a_pos;
@@ -468,6 +471,7 @@ const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 let audioCtx=null, analyser=null, freq=null, masterVol=null;
 let srcNode=null, demoNodes=null, playing=true, isDemo=false;
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
+let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
 let bassAvg=0.0001, beat=0;
 
@@ -522,28 +526,58 @@ function ensureCtx(){
 }
 
 function stopSources(){
-  if(srcNode){ try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
+  if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
   if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
   isDemo=false;
 }
 
 function playFile(file){
   ensureCtx(); stopSources();
+  const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
   const reader = new FileReader();
   reader.onload = () => {
     audioCtx.decodeAudioData(reader.result.slice(0)).then(buf=>{
+      if(tok!==loadToken) return;   // a newer load superseded this one
+      decodeFails=0;
       curBuffer=buf; trackDur=buf.duration; startCtxTime=audioCtx.currentTime;
       srcNode = audioCtx.createBufferSource();
-      srcNode.buffer = buf; srcNode.loop = true;
+      srcNode.buffer = buf; srcNode.loop = playlist.length<=1;   // a single file loops; a queue auto-advances
       srcNode.connect(analyser);
+      srcNode.onended = ()=>{ if(playlist.length>1) nextTrack(); };   // natural end only — manual stops null the handler first
       srcNode.start(); playing=true; isDemo=false; updatePlayBtn();
       setTrackName(file.name);
       showSeek(true);
       idbSaveAudio(file);   // persist for next load
-    }).catch(e=> fatal('Could not decode audio: '+e.message));
+    }).catch(e=>{
+      if(tok!==loadToken) return;
+      toast('could not read '+file.name);
+      if(playlist.length>1 && ++decodeFails<playlist.length) nextTrack();   // skip a bad file within a queue (bounded)
+      else fatal('Could not decode audio: '+e.message);
+    });
   };
   reader.readAsArrayBuffer(file);
 }
+// ---------- playlist queue (multi-file / folder) ----------
+function isAudio(f){ return f && (f.type.startsWith('audio') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba|aif[f]?)$/i.test(f.name)); }
+function loadFiles(files){
+  const aud=[...files].filter(isAudio);
+  if(!aud.length) return;
+  playlist=aud; playIndex(0);
+}
+function playIndex(i){
+  if(!playlist.length) return;
+  curIdx=(i+playlist.length)%playlist.length;
+  playFile(playlist[curIdx]); updateTrackCounter();
+}
+function nextTrack(){ if(playlist.length>1) playIndex(curIdx+1); }
+function prevTrack(){ if(playlist.length>1) playIndex(curIdx-1); }
+// folder-drop traversal (webkitGetAsEntry) — flatten a directory tree into audio Files
+function readDirEntries(dir){ return new Promise(res=>{ const rd=dir.createReader(); const all=[]; (function read(){ rd.readEntries(ents=>{ if(!ents.length) return res(all); all.push(...ents); read(); }, ()=>res(all)); })(); }); }
+function entryToFile(entry){ return new Promise(res=>entry.file(f=>res(f),()=>res(null))); }
+async function collectEntries(entries){ const out=[];
+  async function walk(en){ if(en.isFile){ const f=await entryToFile(en); if(f) out.push(f); } else if(en.isDirectory){ for(const k of await readDirEntries(en)) await walk(k); } }
+  for(const en of entries) await walk(en);
+  return out.filter(isAudio); }
 
 function startDemo(){
   ensureCtx(); stopSources();
@@ -696,7 +730,7 @@ function hideUI(){ ui.classList.remove('show'); hintEl.classList.remove('show');
 function poke(){ showUI(); clearTimeout(idleTimer); if(autoHide) idleTimer=setTimeout(hideUI, IDLE_MS); }
 ['pointermove','pointerdown','wheel','touchstart'].forEach(ev=> window.addEventListener(ev, poke, {passive:true}));
 poke();
-document.getElementById('file').addEventListener('change', e=>{ if(e.target.files[0]) playFile(e.target.files[0]); });
+document.getElementById('file').addEventListener('change', e=>{ if(e.target.files.length) loadFiles(e.target.files); });
 document.getElementById('demo').addEventListener('click', startDemo);
 const playBtn=document.getElementById('play');
 function updatePlayBtn(){ playBtn.textContent = playing?'⏸ Pause':'▶ Play'; }
@@ -715,7 +749,7 @@ function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeE
 function seekTo(frac){
   if(!curBuffer||!audioCtx) return;
   const off=Math.max(0,Math.min(frac,0.999))*trackDur;
-  try{ if(srcNode){ srcNode.stop(); srcNode.disconnect(); } }catch(e){}
+  try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
   srcNode=audioCtx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop=true; srcNode.connect(analyser);
   startCtxTime=audioCtx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
   srcNode.start(0, off);
@@ -728,6 +762,11 @@ function updateSeek(){
 }
 seekEl.addEventListener('input', ()=>{ seeking=true; if(curBuffer) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*trackDur); });
 seekEl.addEventListener('change', ()=>{ if(curBuffer) seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
+// prev / next + track counter
+const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next'), trackCountEl=document.getElementById('trackCount');
+prevBtn.addEventListener('click', prevTrack);
+nextBtn.addEventListener('click', nextTrack);
+function updateTrackCounter(){ const multi=playlist.length>1; trackCountEl.textContent = multi ? (curIdx+1)+' / '+playlist.length : ''; prevBtn.disabled=nextBtn.disabled=!multi; }
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
 function setMode(m){ curMode=m;
@@ -771,6 +810,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
   if(e.key==='f'||e.key==='F') toggleFullscreen();
+  if((e.key==='ArrowRight'||e.key==='ArrowLeft') && document.activeElement!==seekEl){ e.preventDefault(); e.key==='ArrowRight'?nextTrack():prevTrack(); }
   poke();   // any other key counts as activity
 });
 
@@ -779,11 +819,17 @@ const drop=document.getElementById('drop');
 window.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('on'); });
 window.addEventListener('dragleave', e=>{ if(e.relatedTarget===null) drop.classList.remove('on'); });
 window.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('on');
-  const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('audio')) playFile(f); });
+  const dt=e.dataTransfer;
+  if(dt.items && dt.items.length && typeof dt.items[0].webkitGetAsEntry==='function'){
+    const entries=[]; for(const it of dt.items){ const en=it.webkitGetAsEntry(); if(en) entries.push(en); }
+    if(entries.length){ collectEntries(entries).then(loadFiles); return; }
+  }
+  if(dt.files && dt.files.length) loadFiles(dt.files);
+});
 
 // auto-start demo after first gesture (browsers require a user gesture for audio)
 function firstGesture(){
-  if(pendingRestore){ const f=pendingRestore; pendingRestore=null; playFile(f); }
+  if(pendingRestore){ const f=pendingRestore; pendingRestore=null; loadFiles([f]); }
   else startDemo();
   window.removeEventListener('pointerdown',firstGesture); window.removeEventListener('keydown',firstGesture);
 }
