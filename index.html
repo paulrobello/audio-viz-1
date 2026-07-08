@@ -111,6 +111,7 @@
           <option value="3">Ember Bloom</option>
         </select>
         <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
+        <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
       </div>
       <div class="row">
         <div><div class="label">bass</div><div class="meter" id="mBass"></div></div>
@@ -578,7 +579,11 @@ function analyze(){
 
 // ---------- RENDER ----------
 let t0=performance.now(), lastUI=0;
-let curMode=0, curStyle=0, ringOn=true;
+// persisted look settings (volume is persisted separately in its own handler)
+let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
+let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=3)?s:0; })();
+let ringOn = localStorage.getItem('resomance_ring') !== '0';
+let autoHide = localStorage.getItem('resomance_autohide') !== '0';
 function frame(now){
   const time=(now-t0)/1000;
   analyze(); resize();
@@ -635,7 +640,7 @@ const IDLE_MS=10000;
 let idleTimer=null;
 function showUI(){ ui.classList.add('show'); hintEl.classList.add('show'); }
 function hideUI(){ ui.classList.remove('show'); hintEl.classList.remove('show'); }
-function poke(){ showUI(); clearTimeout(idleTimer); idleTimer=setTimeout(hideUI, IDLE_MS); }
+function poke(){ showUI(); clearTimeout(idleTimer); if(autoHide) idleTimer=setTimeout(hideUI, IDLE_MS); }
 ['pointermove','pointerdown','wheel','touchstart'].forEach(ev=> window.addEventListener(ev, poke, {passive:true}));
 poke();
 document.getElementById('file').addEventListener('change', e=>{ if(e.target.files[0]) playFile(e.target.files[0]); });
@@ -649,15 +654,24 @@ playBtn.addEventListener('click', ()=>{
 });
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
-modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(!b) return;
-  curMode=parseInt(b.dataset.mode,10);
-  [...modeSeg.children].forEach(x=>x.classList.toggle('on', x===b)); });
+function setMode(m){ curMode=m;
+  [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===m));
+  localStorage.setItem('resomance_scene', String(m)); }
+modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(b) setMode(parseInt(b.dataset.mode,10)); });
 // palette
 const styleSel=document.getElementById('style');
-styleSel.addEventListener('change', e=> curStyle=parseFloat(e.target.value));
+function setStyle(s){ curStyle=s; styleSel.value=String(s); localStorage.setItem('resomance_palette', String(s)); }
+styleSel.addEventListener('change', e=> setStyle(parseFloat(e.target.value)));
 // ring toggle
 const ringChk=document.getElementById('ring');
-ringChk.addEventListener('change', e=> ringOn=e.target.checked);
+function setRing(on){ ringOn=on; ringChk.checked=on; localStorage.setItem('resomance_ring', on?'1':'0'); }
+ringChk.addEventListener('change', e=> setRing(e.target.checked));
+// auto-hide HUD toggle
+const autohideChk=document.getElementById('autohide');
+autohideChk.addEventListener('change', e=>{ autoHide=e.target.checked; localStorage.setItem('resomance_autohide', autoHide?'1':'0'); if(!autoHide) showUI(); });
+// sync UI to persisted look on load
+[...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode));
+styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide;
 // volume
 const volSlider=document.getElementById('vol'), volLbl=document.getElementById('volLbl');
 const savedVol=parseFloat(localStorage.getItem('resomance_vol'));
@@ -677,9 +691,8 @@ window.addEventListener('keydown', e=>{
     else { poke(); }
     return;
   }
-  if(e.key>='1'&&e.key<='4'){ const m=parseInt(e.key,10)-1; curMode=m;
-    [...modeSeg.children].forEach((x,i)=>x.classList.toggle('on', i===m)); }
-  if(e.key==='r'||e.key==='R'){ ringOn=!ringOn; ringChk.checked=ringOn; }
+  if(e.key>='1'&&e.key<='4') setMode(parseInt(e.key,10)-1);
+  if(e.key==='r'||e.key==='R') setRing(!ringOn);
   poke();   // any other key counts as activity
 });
 
