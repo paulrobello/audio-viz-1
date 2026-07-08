@@ -95,7 +95,10 @@
     -webkit-appearance:none; appearance:none; width:14px; height:14px; border-radius:50%;
     background:#eaf0ff; border:2px solid #6f8bff; cursor:pointer; box-shadow:0 0 8px rgba(120,150,255,.8);
   }
-  .chk { display:inline-flex; align-items:center; gap:6px; cursor:pointer; pointer-events:auto; font-size:11px; color:#cdd6ff; }
+  input[type=color]{ pointer-events:auto; width:26px; height:22px; padding:0; border:1px solid rgba(150,180,255,.35); border-radius:6px; background:none; cursor:pointer; }
+  input[type=color]::-webkit-color-swatch-wrapper{ padding:1px; }
+  input[type=color]::-webkit-color-swatch{ border:none; border-radius:5px; }
+.chk { display:inline-flex; align-items:center; gap:6px; cursor:pointer; pointer-events:auto; font-size:11px; color:#cdd6ff; }
   .chk input { accent-color:#8a7bff; }
 </style>
 </head>
@@ -138,9 +141,17 @@
           <option value="1">Plasma Tomb</option>
           <option value="2">Cold Circuit</option>
           <option value="3">Ember Bloom</option>
+          <option value="4">Custom</option>
         </select>
         <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
         <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
+      </div>
+      <div id="palEdit" style="display:none; margin:6px 0 9px; gap:10px; align-items:center;">
+        <span class="label">custom</span>
+        <label class="chk">a <input type="color" id="cpA" value="#808080"></label>
+        <label class="chk">b <input type="color" id="cpB" value="#808080"></label>
+        <label class="chk">c <input type="color" id="cpC" value="#ffffff"></label>
+        <label class="chk">d <input type="color" id="cpD" value="#0054ab"></label>
       </div>
       <div class="row">
         <div><div class="label">bass</div><div class="meter" id="mBass"></div></div>
@@ -206,17 +217,19 @@ uniform float u_feedback;
 uniform float u_swirl;
 uniform float u_glow;
 uniform int u_rmSteps;
+uniform vec3 u_pa, u_pb, u_pc, u_pd;   // custom cosine-palette vectors
 uniform sampler2D u_prev;
 uniform sampler2D u_spec;   // R8, 256x1 FFT magnitudes
 
 mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
 
 vec3 palette(float t){
-  vec3 a = vec3(0.5), b = vec3(0.5), c = vec3(1.0), d;
-  if(u_style < 0.5){       d = vec3(0.00,0.33,0.67); }
-  else if(u_style < 1.5){  d = vec3(0.30,0.20,0.55); a=vec3(0.6,0.4,0.5); }
-  else if(u_style < 2.5){  d = vec3(0.55,0.55,0.85); a=vec3(0.4,0.5,0.6); }
-  else {                   d = vec3(0.10,0.45,0.75); a=vec3(0.7,0.35,0.2); }
+  vec3 a, b, c, d;
+  if(u_style > 3.5){ a=u_pa; b=u_pb; c=u_pc; d=u_pd; }            // user-edited custom palette
+  else if(u_style < 0.5){ a=vec3(0.5); b=vec3(0.5); c=vec3(1.0); d=vec3(0.00,0.33,0.67); }
+  else if(u_style < 1.5){ a=vec3(0.6,0.4,0.5); b=vec3(0.5); c=vec3(1.0); d=vec3(0.30,0.20,0.55); }
+  else if(u_style < 2.5){ a=vec3(0.4,0.5,0.6); b=vec3(0.5); c=vec3(1.0); d=vec3(0.55,0.55,0.85); }
+  else { a=vec3(0.7,0.35,0.2); b=vec3(0.5); c=vec3(1.0); d=vec3(0.10,0.45,0.75); }
   return a + b*cos(6.28318*(c*t + d));
 }
 
@@ -493,6 +506,7 @@ const U = {
   reducedMotion:uni(progScene,'u_reducedMotion'),
   feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
   rmSteps:uni(progScene,'u_rmSteps'),
+  pa:uni(progScene,'u_pa'), pb:uni(progScene,'u_pb'), pc:uni(progScene,'u_pc'), pd:uni(progScene,'u_pd'),
 };
 const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 
@@ -684,9 +698,18 @@ let pendingShot=false;   // screenshot queued by the S hotkey, captured at end o
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
 let look; try{ look=Object.assign({}, LOOK_DEFAULT, JSON.parse(localStorage.getItem('resomance_look')||'{}')); }catch(e){ look=Object.assign({}, LOOK_DEFAULT); }
+// custom cosine-palette editor (a/b/c/d vectors), persisted
+const CUSTOMPAL_DEFAULT={a:[0.5,0.5,0.5], b:[0.5,0.5,0.5], c:[1,1,1], d:[0,0.33,0.67]};
+let customPal; (()=>{ try{ customPal=JSON.parse(JSON.stringify(CUSTOMPAL_DEFAULT));
+  const s=JSON.parse(localStorage.getItem('resomance_custompal')||'{}');
+  for(const k of ['a','b','c','d']) if(Array.isArray(s[k])&&s[k].length===3) customPal[k]=s[k].map(Number); }catch(e){ customPal=JSON.parse(JSON.stringify(CUSTOMPAL_DEFAULT)); } })();
+function v2h(v){ return '#'+v.map(x=>Math.max(0,Math.min(255,Math.round(x*255))).toString(16).padStart(2,'0')).join(''); }
+function h2v(h){ return (h.replace('#','').match(/.{2}/g)||[]).map(x=>parseInt(x,16)/255); }
+function syncColorInputs(){ const map={cpA:'a',cpB:'b',cpC:'c',cpD:'d'}; for(const id in map){ const el=document.getElementById(id); if(el) el.value=v2h(customPal[map[id]]); } }
+function syncPalEditor(){ const w=document.getElementById('palEdit'); if(!w) return; w.style.display = curStyle===4?'flex':'none'; if(curStyle===4) syncColorInputs(); }
 // persisted look settings (volume is persisted separately in its own handler)
 let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
-let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=3)?s:0; })();
+let curStyle = (()=>{ const s=parseFloat(localStorage.getItem('resomance_palette')); return (s>=0&&s<=4)?s:0; })();
 let ringOn = localStorage.getItem('resomance_ring') !== '0';
 let autoHide = localStorage.getItem('resomance_autohide') !== '0';
 function frame(now){
@@ -715,6 +738,8 @@ function frame(now){
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
   gl.uniform1f(U.feedback, look.feedback); gl.uniform1f(U.swirl, look.swirl); gl.uniform1f(U.glow, look.glow);
   gl.uniform1i(U.rmSteps, qual.rmSteps);
+  gl.uniform3f(U.pa, customPal.a[0],customPal.a[1],customPal.a[2]); gl.uniform3f(U.pb, customPal.b[0],customPal.b[1],customPal.b[2]);
+  gl.uniform3f(U.pc, customPal.c[0],customPal.c[1],customPal.c[2]); gl.uniform3f(U.pd, customPal.d[0],customPal.d[1],customPal.d[2]);
   gl.drawArrays(gl.TRIANGLES,0,3);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
@@ -811,8 +836,10 @@ function setMode(m){ curMode=m;
 modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(b) setMode(parseInt(b.dataset.mode,10)); });
 // palette
 const styleSel=document.getElementById('style');
-function setStyle(s){ curStyle=s; styleSel.value=String(s); localStorage.setItem('resomance_palette', String(s)); }
+function setStyle(s){ curStyle=s; styleSel.value=String(s); localStorage.setItem('resomance_palette', String(s)); syncPalEditor(); }
 styleSel.addEventListener('change', e=> setStyle(parseFloat(e.target.value)));
+// custom palette editor: a/b/c/d color pickers
+[['cpA','a'],['cpB','b'],['cpC','c'],['cpD','d']].forEach(([id,k])=> document.getElementById(id).addEventListener('input', e=>{ customPal[k]=h2v(e.target.value); localStorage.setItem('resomance_custompal', JSON.stringify(customPal)); }));
 // ring toggle
 const ringChk=document.getElementById('ring');
 function setRing(on){ ringOn=on; ringChk.checked=on; localStorage.setItem('resomance_ring', on?'1':'0'); }
@@ -822,7 +849,7 @@ const autohideChk=document.getElementById('autohide');
 autohideChk.addEventListener('change', e=>{ autoHide=e.target.checked; localStorage.setItem('resomance_autohide', autoHide?'1':'0'); if(!autoHide) showUI(); });
 // sync UI to persisted look on load
 [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode));
-styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide;
+styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide; syncPalEditor();
 // volume
 const volSlider=document.getElementById('vol'), volLbl=document.getElementById('volLbl');
 const savedVol=parseFloat(localStorage.getItem('resomance_vol'));
