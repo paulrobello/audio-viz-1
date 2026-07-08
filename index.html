@@ -209,6 +209,8 @@ uniform float u_treble;
 uniform float u_level;
 uniform float u_centroid;
 uniform float u_beat;
+uniform float u_snare;
+uniform float u_hat;
 uniform float u_style;
 uniform float u_mode;
 uniform float u_specOn;
@@ -371,6 +373,10 @@ void main(){
   else if(u_mode < 2.5) col = scenePlasma(uv);
   else                  col = sceneVortex(uv);
 
+  // snare / hat onset accents (spectral-flux onsets) for richer reactivity
+  col += palette(u_time*0.15 + 0.2) * u_snare * 0.10;
+  col += palette(u_time*0.35 + 0.6) * u_hat   * 0.06;
+
   // circular FFT spectrum ring overlay
   if(u_specOn > 0.5){
     float r = length(uv);
@@ -501,6 +507,7 @@ const U = {
   bass:uni(progScene,'u_bass'), mid:uni(progScene,'u_mid'),
   treble:uni(progScene,'u_treble'), level:uni(progScene,'u_level'),
   centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'),
+  snare:uni(progScene,'u_snare'), hat:uni(progScene,'u_hat'),
   style:uni(progScene,'u_style'), mode:uni(progScene,'u_mode'),
   specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
   reducedMotion:uni(progScene,'u_reducedMotion'),
@@ -516,7 +523,8 @@ let srcNode=null, demoNodes=null, playing=true, isDemo=false;
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
-let bassAvg=0.0001, beat=0;
+let beat=0, snare=0, hat=0;            // spectral-flux onset impulses: kick / snare / hat
+let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adaptive onset thresholds
 
 // ---- persist last loaded audio file across reloads (IndexedDB, not localStorage: audio > 5MB quota) ----
 const IDB_DB='resomance', IDB_STORE='audio', IDB_KEY='last';
@@ -671,10 +679,15 @@ function analyze(){
   analyser.getByteFrequencyData(freq);
   const n=freq.length;
   const bassEnd=Math.floor(n*0.06), midEnd=Math.floor(n*0.30);
+  if(!freqPrev || freqPrev.length!==n) freqPrev=new Uint8Array(n);
   let b=0,m=0,tr=0,sum=0,wsum=0,total=0;
+  let kickF=0, snareF=0, hatF=0;   // spectral flux per band (positive bin deltas)
   for(let i=0;i<n;i++){
     const v=freq[i]/255; sum+=v; total+=v; wsum+=v*i;
-    if(i<bassEnd) b+=v; else if(i<midEnd) m+=v; else tr+=v;
+    const d=freq[i]-freqPrev[i];
+    if(i<bassEnd){ b+=v; if(d>0) kickF+=d; }
+    else if(i<midEnd){ m+=v; if(d>0) snareF+=d; }
+    else { tr+=v; if(d>0) hatF+=d; }
   }
   bands.bass=b/Math.max(1,bassEnd);
   bands.mid=m/Math.max(1,midEnd-bassEnd);
@@ -683,10 +696,15 @@ function analyze(){
   bands.centroid=total>0 ? (wsum/total)/n : 0.5;
   // first NBINS of spectrum for the ring (log-ish weighting toward audible range)
   for(let i=0;i<NBINS;i++){ specData[i]=freq[i]; }
+  freqPrev.set(freq);
 
-  bassAvg=bassAvg*0.94+bands.bass*0.06;
-  if(bands.bass>bassAvg*1.35 && bands.bass>0.12) beat=1.0;
-  beat*=0.90;
+  // spectral-flux onset detection per band (kick/snare/hat) with adaptive thresholds
+  kickF/=255*Math.max(1,bassEnd); snareF/=255*Math.max(1,midEnd-bassEnd); hatF/=255*Math.max(1,n-midEnd);
+  kickFlux=kickFlux*0.94+kickF*0.06; snareFlux=snareFlux*0.94+snareF*0.06; hatFlux=hatFlux*0.94+hatF*0.06;
+  if(kickF>kickFlux*1.6 && kickF>0.020) beat=1.0;   // kick drives the existing u_beat
+  if(snareF>snareFlux*1.6 && snareF>0.015) snare=1.0;
+  if(hatF>hatFlux*1.7 && hatF>0.010) hat=1.0;
+  beat*=0.90; snare*=0.88; hat*=0.84;
 }
 
 // ---------- RENDER ----------
@@ -733,6 +751,7 @@ function frame(now){
   gl.uniform1f(U.bass,bands.bass); gl.uniform1f(U.mid,bands.mid);
   gl.uniform1f(U.treble,bands.treble); gl.uniform1f(U.level,bands.level);
   gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
+  gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.mode,curMode);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);

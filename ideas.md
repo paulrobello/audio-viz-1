@@ -29,7 +29,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 - [ ] **Orbit camera for the raymarch scenes** — Mouse-drag to orbit/pan the Fractal (and Tunnel) camera so users can explore the field interactively instead of the fixed auto-camera. (effort: large)
 
 ## Audio analysis
-- [ ] **Onset detection across bands** — Replace the single bass-energy-flux beat detector with spectral-flux onset detection split into kick/snare/hat, feeding distinct uniforms (`u_snare`, `u_hat`) for richer reactivity. (effort: medium)
+- [x] **Onset detection across bands** — Replace the single bass-energy-flux beat detector with spectral-flux onset detection split into kick/snare/hat, feeding distinct uniforms (`u_snare`, `u_hat`) for richer reactivity. (effort: medium)
 - [ ] **Beat-aware palette shifting** — Bias or rotate the palette based on detected tempo and energy so the mood evolves with the music instead of staying fixed per manual selection. (effort: medium)
 
 ## UX, performance & accessibility
