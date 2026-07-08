@@ -44,8 +44,11 @@
   .meter i { width: 5px; background: linear-gradient(180deg,#6f8bff,#b76bff); border-radius: 2px; height: 2px; transition: height .05s linear; }
   .label { color:#7f8bc0; font-size:10px; letter-spacing:.12em; text-transform:uppercase; }
   #hint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
-    color:#9aa6da; font-size:11px; letter-spacing:.1em; opacity:.7; pointer-events:none;
-    text-align:center; }
+    color:#9aa6da; font-size:11px; letter-spacing:.1em; opacity:0; pointer-events:none;
+    text-align:center; transition: opacity .4s ease; }
+  #hint.show { opacity:.7; }
+  /* hidden HUD must not intercept clicks (e.g. after the idle fade-out) */
+  #ui:not(.show) * { pointer-events: none; }
   #err {
     position: fixed; inset: auto 16px 16px 16px; max-width: 760px; margin: 0 auto;
     background: #2a0d12; border: 1px solid #ff5d6c; color: #ffd7db;
@@ -626,7 +629,15 @@ function updateMeters(){
 }
 
 // ---------- CONTROLS ----------
-const ui=document.getElementById('ui'); ui.classList.add('show');
+const ui=document.getElementById('ui'), hintEl=document.getElementById('hint');
+// idle fade: hide the HUD after 10s of inactivity, reveal on any input
+const IDLE_MS=10000;
+let idleTimer=null;
+function showUI(){ ui.classList.add('show'); hintEl.classList.add('show'); }
+function hideUI(){ ui.classList.remove('show'); hintEl.classList.remove('show'); }
+function poke(){ showUI(); clearTimeout(idleTimer); idleTimer=setTimeout(hideUI, IDLE_MS); }
+['pointermove','pointerdown','wheel','touchstart'].forEach(ev=> window.addEventListener(ev, poke, {passive:true}));
+poke();
 document.getElementById('file').addEventListener('change', e=>{ if(e.target.files[0]) playFile(e.target.files[0]); });
 document.getElementById('demo').addEventListener('click', startDemo);
 const playBtn=document.getElementById('play');
@@ -660,10 +671,16 @@ volSlider.addEventListener('input', e=>{
 // keyboard
 window.addEventListener('keydown', e=>{
   if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
-  if(e.key==='h'||e.key==='H'){ ui.classList.toggle('show'); }
+  if(e.key==='h'||e.key==='H'){
+    // manual toggle: hide now and stay hidden until the next pointer/key activity
+    if(ui.classList.contains('show')){ hideUI(); clearTimeout(idleTimer); }
+    else { poke(); }
+    return;
+  }
   if(e.key>='1'&&e.key<='4'){ const m=parseInt(e.key,10)-1; curMode=m;
     [...modeSeg.children].forEach((x,i)=>x.classList.toggle('on', i===m)); }
   if(e.key==='r'||e.key==='R'){ ringOn=!ringOn; ringChk.checked=ringOn; }
+  poke();   // any other key counts as activity
 });
 
 // drag & drop
