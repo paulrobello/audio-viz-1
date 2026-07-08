@@ -133,7 +133,7 @@
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · drag an audio file anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>R</b> ring</div>
+<div id="hint">press <b>H</b> hide UI · drag an audio file anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot</div>
 <div id="toast"></div>
 <div id="drop">drop an audio file to visualize</div>
 <div id="err"></div>
@@ -657,6 +657,12 @@ function updateMeters(){
 const ui=document.getElementById('ui'), hintEl=document.getElementById('hint'), toastEl=document.getElementById('toast');
 let toastTimer=null;
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1400); }
+function toggleFullscreen(){
+  const isFs=document.fullscreenElement||document.webkitFullscreenElement;
+  if(!isFs){ const rq=document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen;
+    if(rq){ try{ const p=rq.call(document.documentElement); if(p&&p.catch) p.catch(()=>{}); toast('fullscreen'); }catch(e){} } }
+  else { const ex=document.exitFullscreen||document.webkitExitFullscreen; if(ex){ try{ ex.call(document); toast('windowed'); }catch(e){} } }
+}
 // idle fade: hide the HUD after 10s of inactivity, reveal on any input
 const IDLE_MS=10000;
 let idleTimer=null;
@@ -716,6 +722,7 @@ window.addEventListener('keydown', e=>{
   if(e.key>='1'&&e.key<='4') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
+  if(e.key==='f'||e.key==='F') toggleFullscreen();
   poke();   // any other key counts as activity
 });
 
