@@ -30,7 +30,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 
 ## Audio analysis
 - [x] **Onset detection across bands** — Replace the single bass-energy-flux beat detector with spectral-flux onset detection split into kick/snare/hat, feeding distinct uniforms (`u_snare`, `u_hat`) for richer reactivity. (effort: medium)
-- [ ] **Beat-aware palette shifting** — Bias or rotate the palette based on detected tempo and energy so the mood evolves with the music instead of staying fixed per manual selection. (effort: medium)
+- [x] **Beat-aware palette shifting** — Bias or rotate the palette based on detected tempo and energy so the mood evolves with the music instead of staying fixed per manual selection. (effort: medium)
 
 ## UX, performance & accessibility
 - [x] **Render-scale / quality toggle + FPS meter** — Expose a Low/Med/High quality control (DPR cap and raymarch step counts are currently hardcoded) and an optional debug FPS counter so it runs on lower-end GPUs. (effort: medium)

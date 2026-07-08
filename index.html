@@ -145,6 +145,7 @@
         </select>
         <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
         <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
+        <label class="chk"><input type="checkbox" id="beatShift" /> beat-shift <span id="bpmVal" class="label">--</span></label>
       </div>
       <div id="palEdit" style="display:none; margin:6px 0 9px; gap:10px; align-items:center;">
         <span class="label">custom</span>
@@ -211,6 +212,7 @@ uniform float u_centroid;
 uniform float u_beat;
 uniform float u_snare;
 uniform float u_hat;
+uniform float u_paletteShift;
 uniform float u_style;
 uniform float u_mode;
 uniform float u_specOn;
@@ -232,7 +234,7 @@ vec3 palette(float t){
   else if(u_style < 1.5){ a=vec3(0.6,0.4,0.5); b=vec3(0.5); c=vec3(1.0); d=vec3(0.30,0.20,0.55); }
   else if(u_style < 2.5){ a=vec3(0.4,0.5,0.6); b=vec3(0.5); c=vec3(1.0); d=vec3(0.55,0.55,0.85); }
   else { a=vec3(0.7,0.35,0.2); b=vec3(0.5); c=vec3(1.0); d=vec3(0.10,0.45,0.75); }
-  return a + b*cos(6.28318*(c*t + d));
+  return a + b*cos(6.28318*(c*t + d) + u_paletteShift);
 }
 
 float hash21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
@@ -514,6 +516,7 @@ const U = {
   feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
   rmSteps:uni(progScene,'u_rmSteps'),
   pa:uni(progScene,'u_pa'), pb:uni(progScene,'u_pb'), pc:uni(progScene,'u_pc'), pd:uni(progScene,'u_pd'),
+  paletteShift:uni(progScene,'u_paletteShift'),
 };
 const UC = { tex:uni(progCopy,'u_tex'), res:uni(progCopy,'u_res') };
 
@@ -712,6 +715,7 @@ function analyze(){
 let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0, lastFrame=0, fpsEMA=0;
+let bpm=0, paletteShift=0, prevBeat=0; const beatTimes=[];   // beat-aware palette shift
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
@@ -735,6 +739,11 @@ function frame(now){
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
   if(dt>0){ const inst=1000/dt; fpsEMA = fpsEMA? fpsEMA*0.9+inst*0.1 : inst; }
   analyze(); resize();
+  // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
+  if(beat>prevBeat+0.5){ beatTimes.push(time); if(beatTimes.length>12) beatTimes.shift();
+    if(beatTimes.length>=4){ const iv=[]; for(let i=1;i<beatTimes.length;i++) iv.push(beatTimes[i]-beatTimes[i-1]); iv.sort((a,b)=>a-b); const med=iv[Math.floor(iv.length/2)]; if(med>0.3&&med<2.0) bpm=Math.round(60/med); } }
+  prevBeat=beat;
+  if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + bands.level*0.16);
 
   // upload spectrum
   gl.bindTexture(gl.TEXTURE_2D, specTex);
@@ -752,6 +761,7 @@ function frame(now){
   gl.uniform1f(U.treble,bands.treble); gl.uniform1f(U.level,bands.level);
   gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
   gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
+  gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.mode,curMode);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
@@ -774,7 +784,7 @@ function frame(now){
     toast('screenshot saved'); }
 
   let t2=texA; texA=texB; texB=t2; let f2=fboA; fboA=fboB; fboB=f2;
-  if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); if(showFps) fpsVal.textContent=Math.round(fpsEMA)+' fps'; }
+  if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); if(showFps) fpsVal.textContent=Math.round(fpsEMA)+' fps'; if(beatShiftOn&&bpm) bpmVal.textContent=bpm+' bpm'; }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -896,6 +906,11 @@ const fpsChk=document.getElementById('fpsChk'), fpsVal=document.getElementById('
 let showFps = localStorage.getItem('resomance_fps')==='1';
 fpsChk.checked=showFps; if(!showFps) fpsVal.textContent='';
 fpsChk.addEventListener('change', e=>{ showFps=e.target.checked; localStorage.setItem('resomance_fps', showFps?'1':'0'); if(!showFps) fpsVal.textContent='--'; });
+// beat-aware palette shift toggle (BPM estimate drives palette rotation)
+const beatShiftChk=document.getElementById('beatShift'), bpmVal=document.getElementById('bpmVal');
+let beatShiftOn = localStorage.getItem('resomance_beatshift')==='1';
+beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
+beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
 // keyboard
 window.addEventListener('keydown', e=>{
   if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
