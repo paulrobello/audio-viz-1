@@ -32,7 +32,7 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; width: 100%; overflow: hidden; background: #000; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-  #gl { display: block; width: 100vw; height: 100vh; }
+  #gl { display: block; width: 100vw; height: 100vh; touch-action: none; }
 
   #ui {
     position: fixed; inset: 0; pointer-events: none;
@@ -208,7 +208,7 @@
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · drag audio files/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
+<div id="hint">press <b>H</b> hide UI · <b>drag</b> orbit · drop audio/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
 <div id="toast"></div>
 <div id="help"><div class="box">
   <h2>R E S O M A N C E — shortcuts</h2>
@@ -222,7 +222,7 @@
     <tr><td class="k"><b>S</b></td><td>screenshot (PNG)</td></tr>
     <tr><td class="k"><b>?</b></td><td>this cheat sheet</td></tr>
   </table>
-  <div class="note">Drop audio files or a folder anywhere to load a full set. The on-screen panel also exposes quality, palette, the look controls, and a custom palette editor.</div>
+  <div class="note">Drag the canvas to orbit the Fractal/Tunnel camera (double-click resets to auto). Drop audio files or a folder anywhere to load a full set. The on-screen panel exposes quality, palette, the look controls, and a custom palette editor.</div>
   <div class="esc">press <b>?</b> or <b>Esc</b> to close</div>
 </div></div>
 <div id="drop">drop an audio file to visualize</div>
@@ -254,6 +254,9 @@ uniform float u_style;
 uniform float u_modeA;
 uniform float u_modeB;
 uniform float u_blend;
+uniform float u_orbit;
+uniform float u_camYaw;
+uniform float u_camPitch;
 uniform float u_specOn;
 uniform float u_reducedMotion;
 uniform float u_feedback;
@@ -309,9 +312,9 @@ float map0(vec3 p){
 }
 vec3 sceneFractal(vec2 uv){
   float camDist = 3.6 - u_bass*1.1 - u_beat*0.4;
-  vec3 ro = vec3(0.0, 0.0, camDist);
-  ro.xz *= rot(u_time*0.12 + u_centroid*1.2);
-  ro.y = sin(u_time*0.18)*0.6;
+  vec3 ro;
+  if(u_orbit > 0.5){ float cp=cos(u_camPitch); ro = camDist*vec3(sin(u_camYaw)*cp, sin(u_camPitch), cos(u_camYaw)*cp); }   // manual spherical orbit
+  else { ro = vec3(0.0, 0.0, camDist); ro.xz *= rot(u_time*0.12 + u_centroid*1.2); ro.y = sin(u_time*0.18)*0.6; }          // auto camera
   vec3 fwd = normalize(-ro);
   vec3 rgt = normalize(cross(vec3(0.0,1.0,0.0), fwd));
   vec3 up  = cross(fwd, rgt);
@@ -351,6 +354,7 @@ vec3 sceneFractal(vec2 uv){
 vec3 sceneTunnel(vec2 uv){
   vec3 ro = vec3(sin(u_time*0.5)*0.3, cos(u_time*0.37)*0.3, 0.0) * (0.5 + u_bass);
   vec3 rd = normalize(vec3(uv, 1.3));
+  if(u_orbit > 0.5){ rd.yz *= rot(u_camPitch*0.6); rd.xz *= rot(u_camYaw*0.6); }   // look around while flying
   float t = 0.0, glow = 0.0; bool hit = false; vec3 p = vec3(0.0);
   for(int i=0;i<120;i++){
     if(i>=u_rmSteps) break;
@@ -597,6 +601,7 @@ const U = {
   centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'),
   snare:uni(progScene,'u_snare'), hat:uni(progScene,'u_hat'),
   style:uni(progScene,'u_style'), modeA:uni(progScene,'u_modeA'), modeB:uni(progScene,'u_modeB'), blend:uni(progScene,'u_blend'),
+  camYaw:uni(progScene,'u_camYaw'), camPitch:uni(progScene,'u_camPitch'), orbit:uni(progScene,'u_orbit'),
   specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
   reducedMotion:uni(progScene,'u_reducedMotion'),
   feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
@@ -828,6 +833,8 @@ let modeA=curMode, modeB=curMode, blend=0;
 let autoMixOn = localStorage.getItem('resomance_automix')==='1';
 let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null;
 function clockSec(){ return (performance.now()-t0)/1000; }
+// orbit camera (drag) state for the raymarch scenes
+let camYaw=0, camPitch=0, orbitActive=false, dragging=false, lastDX=0, lastDY=0;
 function frame(now){
   const time=(now-t0)/1000;
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
@@ -863,6 +870,7 @@ function frame(now){
   gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
   gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.modeA,modeA); gl.uniform1f(U.modeB,modeB); gl.uniform1f(U.blend,blend);
+  gl.uniform1f(U.camYaw, camYaw); gl.uniform1f(U.camPitch, camPitch); gl.uniform1f(U.orbit, orbitActive?1:0);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
   gl.uniform1f(U.feedback, look.feedback); gl.uniform1f(U.swirl, look.swirl); gl.uniform1f(U.glow, look.glow);
@@ -1072,6 +1080,13 @@ window.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('
   }
   if(dt.files && dt.files.length) loadFiles(dt.files);
 });
+// orbit camera: drag on the canvas to look around the Fractal/Tunnel field (double-click resets to auto)
+canvas.addEventListener('pointerdown', e=>{ if(e.button!==0) return; dragging=true; lastDX=e.clientX; lastDY=e.clientY; orbitActive=true; try{canvas.setPointerCapture(e.pointerId);}catch(_){} });
+canvas.addEventListener('pointermove', e=>{ if(!dragging) return; camYaw -= (e.clientX-lastDX)*0.008; camPitch = Math.max(-1.2, Math.min(1.2, camPitch - (e.clientY-lastDY)*0.008)); lastDX=e.clientX; lastDY=e.clientY; });
+const endDrag=e=>{ dragging=false; try{canvas.releasePointerCapture(e.pointerId);}catch(_){} };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('dblclick', ()=>{ orbitActive=false; camYaw=camPitch=0; toast('auto camera'); });
 
 // auto-start demo after first gesture (browsers require a user gesture for audio)
 function firstGesture(){

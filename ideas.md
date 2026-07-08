@@ -26,7 +26,7 @@ Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of
 - [x] **Adjustable feedback & look controls** — Expose currently hardcoded constants — feedback decay (`0.90`), swirl angle, glow/zoom — as sliders in a collapsible "look" panel, persisted like volume. (effort: medium)
 - [x] **Bloom post-process pass** — Insert a bright-pass + blur bloom pass between the scene and copy shaders for punchier glow on bright hits, intensified on beats. (effort: large)
 - [x] **Custom palette editor** — Let users edit the cosine-palette `a/b/c/d` vectors with color pickers and save their own palette to `localStorage`, beyond the four built-ins. (effort: medium)
-- [ ] **Orbit camera for the raymarch scenes** — Mouse-drag to orbit/pan the Fractal (and Tunnel) camera so users can explore the field interactively instead of the fixed auto-camera. (effort: large)
+- [x] **Orbit camera for the raymarch scenes** — Mouse-drag to orbit/pan the Fractal (and Tunnel) camera so users can explore the field interactively instead of the fixed auto-camera. (effort: large)
 
 ## Audio analysis
 - [x] **Onset detection across bands** — Replace the single bass-energy-flux beat detector with spectral-flux onset detection split into kick/snare/hat, feeding distinct uniforms (`u_snare`, `u_hat`) for richer reactivity. (effort: medium)
