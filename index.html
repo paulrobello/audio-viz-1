@@ -20,6 +20,14 @@
 <meta name="twitter:title" content="RESOMANCE — Audio-Reactive Visualizer" />
 <meta name="twitter:description" content="A dependency-free, audio-reactive WebGL2 visualizer. Drop in any track and watch the sound sculpt living fields." />
 <meta name="twitter:image" content="og.jpg" />
+<!-- PWA: installable + offline -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0a0e1a" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="RESOMANCE" />
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -949,6 +957,9 @@ function firstGesture(){
 }
 window.addEventListener('pointerdown', firstGesture);
 window.addEventListener('keydown', firstGesture);
+
+// PWA: register service worker for installable + offline support
+if('serviceWorker' in navigator) window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 </script>
 </body>
 </html>
