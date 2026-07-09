@@ -2,16 +2,18 @@
 // script, relocated verbatim from index.html. checkJs stays ON in jsconfig.json so the
 // modules split out in later tasks (audio/playback/gl/render/camera/ui/controls) ARE
 // type-checked; this per-file opt-out exists only until the code below is decomposed.
+// ui.js (Task 8) took the player chrome + display. Remaining here until Task 9: the
+// render/frame loop, scene/palette/look/router/shader/quality/fps/beatshift/autogain
+// panels, volume slider, presets, file/url/drag-drop, and the keydown handler.
 // Removed by Task 10, when main.js is a small, fully-typed boot + frame-loop file.
 import './styles.css';
-import { state, on } from './state.js';
+import { state, emit } from './state.js';
 import { audio, analyze } from './audio.js';
 import * as pb from './playback.js';
 import { resize, setQuality } from './gl.js';
 import { initRender, renderFrame, requestScreenshot, compileUserShader } from './render.js';
 import { cam, initCamera } from './camera.js';
-const errEl = document.getElementById('err');
-function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
+import { initUI, fatal, updateMeters, updateSeek, poke, toggleHelp, toggleFullscreen, toggleHideKey, isHelpOpen, isSeekFocused } from './ui.js';
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
 
 const canvas = document.getElementById('gl');
@@ -21,16 +23,8 @@ window.addEventListener('resize', resize);   // gl.js performs the initial resiz
 initRender();
 // wire orbit/pinch-zoom camera gestures onto the canvas (mutates cam.* in place)
 initCamera(canvas);
-
-// ---------- transport bus: playback.js → view (UI updates that used to be inline) ----------
-on('transport', (e) => {
-  if (e.type === 'playState') updatePlayBtn();
-  else if (e.type === 'trackName') document.getElementById('sub').textContent = e.name;
-  else if (e.type === 'seekVisibility') showSeek(e.on);
-  else if (e.type === 'trackCount') updateTrackCounter();
-  else if (e.type === 'toast') toast(e.msg);
-  else if (e.type === 'fatal') fatal(e.msg);
-});
+// wire player chrome (meters/toast/help/idle/play/seek/transport) + the 'transport' bus subscription
+initUI();
 // persist the queue position (playback owns the data; main.js owns the app lifecycle)
 setInterval(() => pb.saveQueuePos(), 5000);   // checkpoint playback position periodically
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') pb.saveQueuePos(); });
@@ -60,7 +54,6 @@ let scenePalette = state.scenePalette;
 localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette));   // normalize on-disk (pad to len 6), as before
 let curStyle = scenePalette[curMode]||0;
 let ringOn = state.ringOn;
-let autoHide = state.autoHide;
 // scene crossfade + auto-mix state (declared after curMode to avoid a TDZ on the modeA initializer)
 const AUTO_MIX_INTERVAL=14, AUTO_MIX_DUR=0.7;
 let modeA=curMode, modeB=curMode, blend=0;
@@ -97,76 +90,11 @@ function frame(now){
 }
 requestAnimationFrame(frame);
 
-// ---------- HUD ----------
-function buildMeters(el,n){ for(let i=0;i<n;i++) el.appendChild(document.createElement('i')); }
-buildMeters(document.getElementById('mBass'),14);
-buildMeters(document.getElementById('mMid'),14);
-buildMeters(document.getElementById('mTreble'),14);
-function paintMeter(el,val){ const b=el.children, lit=Math.round(val*14);
-  for(let i=0;i<b.length;i++){ b[i].style.height=(i<lit?(3+(i/b.length)*23):2)+'px'; b[i].style.opacity=i<lit?1:0.25; } }
-function updateMeters(){
-  paintMeter(document.getElementById('mBass'),audio.bands.bass);
-  paintMeter(document.getElementById('mMid'),audio.bands.mid);
-  paintMeter(document.getElementById('mTreble'),audio.bands.treble);
-}
-
-// ---------- CONTROLS ----------
-const ui=document.getElementById('ui'), hintEl=document.getElementById('hint'), toastEl=document.getElementById('toast');
-let toastTimer=null;
-function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1400); }
-function toggleFullscreen(){
-  // @ts-expect-error document.webkitFullscreenElement is a legacy Safari-prefixed API absent from the TS DOM lib
-  const isFs=document.fullscreenElement||document.webkitFullscreenElement;
-  // @ts-expect-error webkitRequestFullscreen is a legacy Safari-prefixed API absent from the TS DOM lib
-  if(!isFs){ const rq=document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen;
-    if(rq){ try{ const p=rq.call(document.documentElement); if(p&&p.catch) p.catch(()=>{}); toast('fullscreen'); }catch(e){} } }
-  // @ts-expect-error webkitExitFullscreen is a legacy Safari-prefixed API absent from the TS DOM lib
-  else { const ex=document.exitFullscreen||document.webkitExitFullscreen; if(ex){ try{ ex.call(document); toast('windowed'); }catch(e){} } }
-}
-const helpEl=document.getElementById('help');
-function toggleHelp(force){ helpEl.classList.toggle('show', force!==undefined?force:!helpEl.classList.contains('show')); }
-helpEl.addEventListener('click', e=>{ if(e.target===helpEl) toggleHelp(false); });   // backdrop click closes
-// idle fade: hide the HUD after 10s of inactivity, reveal on any input
-const IDLE_MS=10000;
-let idleTimer=null;
-function showUI(){ ui.classList.add('show'); hintEl.classList.add('show'); }
-function hideUI(){ ui.classList.remove('show'); hintEl.classList.remove('show'); }
-function poke(){ showUI(); clearTimeout(idleTimer); if(autoHide) idleTimer=setTimeout(hideUI, IDLE_MS); }
-['pointermove','pointerdown','wheel','touchstart'].forEach(ev=> window.addEventListener(ev, poke, {passive:true}));
-poke();
+// ---------- file / url / demo source loaders (Task 9 will relocate these) ----------
 document.getElementById('file').addEventListener('change', e=>{ if(e.target.files.length) pb.loadFiles(e.target.files); });
 document.getElementById('demo').addEventListener('click', pb.startDemo);
 document.getElementById('urlLoad').addEventListener('click', ()=>{ const u=document.getElementById('urlIn').value.trim(); if(u) pb.playUrl(u); });
 document.getElementById('urlIn').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('urlLoad').click(); } });
-const playBtn=document.getElementById('play');
-function updatePlayBtn(){ playBtn.textContent = pb.isPlaying()?'⏸ Pause':'▶ Play'; }
-playBtn.addEventListener('click', () => pb.togglePlay());
-// ---------- transport: seek bar (file playback only) ----------
-const seekRow=document.getElementById('seekRow'), seekEl=document.getElementById('seek'),
-      curTimeEl=document.getElementById('curTime'), totTimeEl=document.getElementById('totTime');
-let seeking=false;
-function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
-  return (h>0? h+':'+String(m).padStart(2,'0') : String(m))+':'+String(sec).padStart(2,'0'); }
-function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(pb.getTrackDur()); }
-function updateSeek(){
-  if(!pb.hasBuffer()||!audio.ctx||seeking) return;
-  const el=pb.currentElapsed(), dur=pb.getTrackDur();
-  seekEl.value=String(Math.round(el/dur*1000));
-  curTimeEl.textContent=fmtTime(el);
-}
-seekEl.addEventListener('input', ()=>{ seeking=true; if(pb.hasBuffer()) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*pb.getTrackDur()); });
-seekEl.addEventListener('change', ()=>{ if(pb.hasBuffer()) pb.seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
-// prev / next + track counter
-const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next'), trackCountEl=document.getElementById('trackCount'),
-      shufBtn=document.getElementById('shuf'), repBtn=document.getElementById('rep');
-prevBtn.addEventListener('click', pb.prevTrack);
-nextBtn.addEventListener('click', pb.nextTrack);
-function updateTrackCounter(){ const pl=pb.getPlaylist(), ci=pb.getCurIdx(); const multi=pl.length>1; trackCountEl.textContent = multi ? (ci+1)+' / '+pl.length : ''; prevBtn.disabled=nextBtn.disabled=shufBtn.disabled=repBtn.disabled=!multi; }
-function applyShufUI(){ shufBtn.classList.toggle('on', state.shuffleOn); }
-function applyRepUI(){ repBtn.classList.toggle('on', state.repeatMode!==0); repBtn.textContent = state.repeatMode===2 ? '↻1' : '↻'; }
-shufBtn.addEventListener('click', ()=>{ state.shuffleOn=!state.shuffleOn; localStorage.setItem('resomance_shuffle', state.shuffleOn?'1':'0'); applyShufUI(); toast(state.shuffleOn?'shuffle on':'shuffle off'); });
-repBtn.addEventListener('click', ()=>{ state.repeatMode=(state.repeatMode+1)%3; pb.applyLoop(); localStorage.setItem('resomance_repeat', String(state.repeatMode)); applyRepUI(); toast(['repeat off','repeat all','repeat one'][state.repeatMode]); });
-applyShufUI(); applyRepUI();
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
 function applyModeUI(){ [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode)); }
@@ -185,7 +113,7 @@ function setRing(on){ ringOn=on; state.ringOn=on; ringChk.checked=on; localStora
 ringChk.addEventListener('change', e=> setRing(e.target.checked));
 // auto-hide HUD toggle
 const autohideChk=document.getElementById('autohide');
-autohideChk.addEventListener('change', e=>{ autoHide=e.target.checked; localStorage.setItem('resomance_autohide', autoHide?'1':'0'); if(!autoHide) showUI(); });
+autohideChk.addEventListener('change', e=>{ state.autoHide=e.target.checked; localStorage.setItem('resomance_autohide', state.autoHide?'1':'0'); if(!state.autoHide) poke(); });
 // auto-mix scene cycling (crossfade to next scene on a timer)
 const autoMixChk=document.getElementById('autoMix');
 autoMixChk.checked=autoMixOn;
@@ -193,7 +121,7 @@ autoMixChk.addEventListener('change', e=>{ autoMixOn=e.target.checked; localStor
   if(autoMixOn){ mixTrans=null; mixArmedAt=null; autoMixNext=clockSec()+AUTO_MIX_INTERVAL; } else { modeA=modeB=curMode; blend=0; mixTrans=null; mixArmedAt=null; } });
 // sync UI to persisted look on load
 applyModeUI();
-styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide; syncPalEditor();
+styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=state.autoHide; syncPalEditor();
 // volume
 const volSlider=document.getElementById('vol'), volLbl=document.getElementById('volLbl');
 const savedVol=state.volume;
@@ -253,7 +181,7 @@ let presets = state.presets;
 while(presets.length<8) presets.push(null);
 function syncLookSliders(){ for(const k of ['feedback','swirl','glow','vig','ca','grain']){ const el=document.getElementById('lk'+k.charAt(0).toUpperCase()+k.slice(1)); if(el) el.value=look[k]; } }
 function syncRouterUI(){ for(const [id,src] of [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']]){ const s=document.getElementById(id); if(s) s.value=router[src]; } }
-function captureLook(){ return { mode:curMode, style:scenePalette[curMode], look:{...look}, router:{...router}, customPal:JSON.parse(JSON.stringify(customPal)), ring:ringOn, autoHide, autoMix:autoMixOn, beatShift:beatShiftOn, autoGain:state.autoGainOn }; }
+function captureLook(){ return { mode:curMode, style:scenePalette[curMode], look:{...look}, router:{...router}, customPal:JSON.parse(JSON.stringify(customPal)), ring:ringOn, autoHide:state.autoHide, autoMix:autoMixOn, beatShift:beatShiftOn, autoGain:state.autoGainOn }; }
 function applyLook(p){
   scenePalette[p.mode]=p.style; setMode(p.mode); localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette));
   Object.assign(look, p.look); localStorage.setItem('resomance_look', JSON.stringify(look)); syncLookSliders();
@@ -265,8 +193,8 @@ function applyLook(p){
   beatShiftChk.checked=p.beatShift; beatShiftChk.dispatchEvent(new Event('change'));
   agcChk.checked=p.autoGain; agcChk.dispatchEvent(new Event('change'));
 }
-function savePreset(i){ presets[i]=captureLook(); localStorage.setItem('resomance_presets', JSON.stringify(presets)); updatePresetUI(); toast('saved preset '+(i+1)); }
-function recallPreset(i){ if(!presets[i]){ toast('preset '+(i+1)+' empty'); return; } applyLook(presets[i]); toast('recalled preset '+(i+1)); }
+function savePreset(i){ presets[i]=captureLook(); localStorage.setItem('resomance_presets', JSON.stringify(presets)); updatePresetUI(); emit('transport', {type:'toast', msg:'saved preset '+(i+1)}); }
+function recallPreset(i){ if(!presets[i]){ emit('transport', {type:'toast', msg:'preset '+(i+1)+' empty'}); return; } applyLook(presets[i]); emit('transport', {type:'toast', msg:'recalled preset '+(i+1)}); }
 function updatePresetUI(){ document.querySelectorAll('.ps').forEach(b=> b.classList.toggle('filled', !!presets[+b.dataset.s-1])); }
 const psSave=document.getElementById('psSave');
 document.querySelectorAll('.ps').forEach(b=> b.addEventListener('click', ()=>{ const i=+b.dataset.s-1; if(psSave.checked) savePreset(i); else recallPreset(i); }));
@@ -274,21 +202,16 @@ updatePresetUI();
 
 window.addEventListener('keydown', e=>{
   if(e.key==='?'){ toggleHelp(); return; }
-  if(e.key==='Escape' && helpEl.classList.contains('show')){ toggleHelp(false); return; }
-  if(helpEl.classList.contains('show')) return;   // modal: swallow other keys while the cheat sheet is open
-  if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
-  if(e.key==='h'||e.key==='H'){
-    // manual toggle: hide now and stay hidden until the next pointer/key activity
-    if(ui.classList.contains('show')){ hideUI(); clearTimeout(idleTimer); }
-    else { poke(); }
-    return;
-  }
+  if(e.key==='Escape' && isHelpOpen()){ toggleHelp(false); return; }
+  if(isHelpOpen()) return;   // modal: swallow other keys while the cheat sheet is open
+  if(e.code==='Space'){ e.preventDefault(); pb.togglePlay(); }
+  if(e.key==='h'||e.key==='H'){ toggleHideKey(); return; }
   if(e.shiftKey && e.code.startsWith('Digit')){ const n=parseInt(e.code.slice(5),10); if(n>=1&&n<=8){ e.preventDefault(); if(e.ctrlKey||e.metaKey) savePreset(n-1); else recallPreset(n-1); return; } }
   if(e.key>='1'&&e.key<='6') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') requestScreenshot();
   if(e.key==='f'||e.key==='F') toggleFullscreen();
-  if((e.key==='ArrowRight'||e.key==='ArrowLeft') && document.activeElement!==seekEl){ e.preventDefault(); e.key==='ArrowRight'?pb.nextTrack():pb.prevTrack(); }
+  if((e.key==='ArrowRight'||e.key==='ArrowLeft') && !isSeekFocused()){ e.preventDefault(); e.key==='ArrowRight'?pb.nextTrack():pb.prevTrack(); }
   poke();   // any other key counts as activity
 });
 
