@@ -7,6 +7,11 @@ hyperspace-warp tunnel, liquid plasma, a spiral vortex, an audio-reactive
 terrain, an audio-reactive particle galaxy, and a user-pasted shader — with phosphor-style feedback trails, a
 circular FFT spectrum ring, beat detection, and a master volume control.
 
+Live sources include local files, a pasted URL/stream, the built-in demo, and a
+microphone/line-in. A VJ can crossfade between tracks, record a clip with sound
+as `.webm`, and open a clean UI-free projection window (synced over
+`BroadcastChannel`) for a second monitor or projector.
+
 The **Tunnel** scene raymarches a coiling, serpentine bore: ribbed neon walls
 twist down the tube, light-speed streaks tear past, fresnel rims blaze on the
 silhouettes, volumetric god-rays pour down the bore, and a shockwave ring blasts

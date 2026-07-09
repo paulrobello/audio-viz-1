@@ -11,6 +11,13 @@ import { initRender, renderFrame } from './render.js';
 import { cam, initCamera } from './camera.js';
 import { initUI, fatal, updateMeters, updateSeek } from './ui.js';
 import { initControls, applyModeUI, applyScenePalette } from './controls.js';
+import { postFrame, runProjection } from './projection.js';
+
+// ?projection=1 boots a pristine, UI-free renderer driven by a BroadcastChannel feed from the
+// controller window (see projection.js). Otherwise the normal controller boot runs below.
+const PROJECTION = new URLSearchParams(location.search).get('projection') === '1';
+
+function runNormal() {
 
 window.addEventListener('error', (e) => fatal((e.message || 'error') + (e.filename ? '\n' + e.filename + ':' + e.lineno : '')));
 
@@ -68,7 +75,9 @@ function frame(now) {
   }
 
   // render: spectrum upload + scene + bloom + composite + (optional) screenshot + ping-pong swap
-  renderFrame({ time, beatPhase, modeA: state.modeA, modeB: state.modeB, blend: state.blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active });
+  const params = { time, beatPhase, modeA: state.modeA, modeB: state.modeB, blend: state.blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active };
+  renderFrame(params);
+  postFrame(params);   // mirror to the projection window (no-op when none is open)
 
   if (now - lastUI > 50) { lastUI = now; updateMeters(); updateSeek(); if (state.showFps) document.getElementById('fpsVal').textContent = Math.round(fpsEMA) + ' fps'; if (state.beatShiftOn && bpm) document.getElementById('bpmVal').textContent = bpm + ' bpm'; const kv = document.getElementById('keyVal'); if (kv) kv.textContent = audio.key.name; }
   requestAnimationFrame(frame);
@@ -84,4 +93,7 @@ window.addEventListener('pointerdown', firstGesture);
 window.addEventListener('keydown', firstGesture);
 
 // PWA: register service worker for installable + offline support
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
+if (PROJECTION) runProjection(); else runNormal();

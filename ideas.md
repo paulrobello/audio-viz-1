@@ -44,7 +44,7 @@ rough.
 
 ### Capture & output
 - [x] **Video recording with audio (WebM export)** — Wire `canvas.captureStream()` plus a `MediaStreamAudioDestinationNode` track into a `MediaRecorder` so users can record a clip of the visualization *with sound* and download a `.webm`, complementing the existing still `S` screenshot. (effort: large)
-- [ ] **Second-window / projection output** — Open a clean, fullscreen, UI-free copy of the canvas in a separate window (synced over `BroadcastChannel`) so a VJ can control the look from the main window while projecting the pristine viz to a second monitor or projector. (effort: large)
+- [x] **Second-window / projection output** — Open a clean, fullscreen, UI-free copy of the canvas in a separate window (synced over `BroadcastChannel`) so a VJ can control the look from the main window while projecting the pristine viz to a second monitor or projector. (effort: large)
 
 ### Audio analysis & reactivity
 - [x] **Mel-spaced spectrum + chromagram / key detection** — Replace the linear FFT band split with perceptual (mel/log) binning and add a chroma vector + key estimate, so palette and scene choices can follow the song's actual harmonic content and key instead of only bass/mid/treble energy. (effort: large)

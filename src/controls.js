@@ -15,6 +15,7 @@ import { toggleHelp, toggleFullscreen, toggleHideKey, isHelpOpen, isSeekFocused,
 import { compileUserShader, requestScreenshot } from './render.js';
 import { setQuality } from './gl.js';
 import { toggleRecording } from './capture.js';
+import { openProjection } from './projection.js';
 
 // auto-mix interval clock — shares state.bootT0 (set in state.js, which loads first) so the
 // interval timer is provably on the same epoch as main.js's frame clock, not just empirically.
@@ -261,6 +262,9 @@ export function initControls() {
     recBtn.addEventListener('click', () => toggleRecording());
     on('transport', (e) => { if (e.type === 'recState') { recBtn.classList.toggle('rec', !!e.on); recBtn.textContent = e.on ? '■ Stop rec' : '⏺ Rec'; } });
   }
+  // second-window / projection output: open a clean UI-free viz window synced over BroadcastChannel
+  const projBtn = document.getElementById('projectToggle');
+  if (projBtn) projBtn.addEventListener('click', () => openProjection());
 
   // keyboard: player keys -> pb, display keys -> ui, scene/look keys -> local
   window.addEventListener('keydown', (e) => {
