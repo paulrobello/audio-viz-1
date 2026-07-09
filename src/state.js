@@ -18,7 +18,7 @@ export const state = {
   scenePalette: (() => {
     let a;
     try { a = JSON.parse(localStorage.getItem('resomance_scene_palette') ?? 'null'); } catch (_) {}
-    if (!Array.isArray(a)) {
+    if (!Array.isArray(a) || !a.length) {   // empty/absent array → re-seed from the legacy global palette (matches the original seeding IIFE)
       const lg = parseFloat(localStorage.getItem('resomance_palette'));
       const v = lg >= 0 && lg <= 4 ? lg : 0;
       a = [v, v, v, v];
