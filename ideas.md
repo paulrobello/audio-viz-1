@@ -33,4 +33,4 @@ UX/perf/integration. Effort is rough.
 
 ## UX, performance & integration
 - [x] **Named look presets / snapshot slots** — Save and recall the full visual state (scene + palette + look sliders + toggles) into named slots switchable with keys, so polished looks can be queued and recalled during a set. (effort: medium)
-- [ ] **Mobile / touch polish** — Make the HUD responsive with larger hit targets, add pinch-to-zoom and two-finger orbit gestures alongside the existing pointer-drag camera, so the viz is usable on phones/tablets, not just desktop Chromium. (effort: medium)
+- [x] **Mobile / touch polish** — Make the HUD responsive with larger hit targets, add pinch-to-zoom and two-finger orbit gestures alongside the existing pointer-drag camera, so the viz is usable on phones/tablets, not just desktop Chromium. (effort: medium)
