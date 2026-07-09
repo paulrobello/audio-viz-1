@@ -52,6 +52,8 @@ export function setMode(m) {
   if (state.autoMixOn) state.autoMixNext = clockSec() + state.autoMixInterval;
 }
 function setStyle(s) { state.curStyle = s; state.scenePalette[state.curMode] = s; styleSel.value = String(s); localStorage.setItem('resomance_scene_palette', JSON.stringify(state.scenePalette)); syncPalEditor(); }
+// cycle the current scene's palette forward/backward (keyboard-friendly wrapper over setStyle)
+function cycleStyle(dir) { setStyle((state.curStyle + dir + 5) % 5); }
 function setRing(on) { state.ringOn = on; ringChk.checked = on; localStorage.setItem('resomance_ring', on ? '1' : '0'); }
 
 // ---------- presets (snapshot slots), recalled with Shift+1..8 ----------
@@ -160,6 +162,16 @@ export function initControls() {
     RT_OPTS.forEach((o) => { const op = document.createElement('option'); op.value = o; op.textContent = o; sel.appendChild(op); });
     sel.addEventListener('change', () => { state.router[src] = sel.value; localStorage.setItem('resomance_router', JSON.stringify(state.router)); });
   });
+  // keyboard nudge for a router source's target (none→swirl→glow→feedback), mirrored into the select UI + toasted
+  const RT_ID = { kick: 'rtKick', snare: 'rtSnare', hat: 'rtHat', bass: 'rtBass' };
+  function cycleRouter(src, dir) {
+    const cur = RT_OPTS.indexOf(state.router[src]);
+    const next = RT_OPTS[((cur < 0 ? 0 : cur) + dir + RT_OPTS.length) % RT_OPTS.length];
+    state.router[src] = next;
+    localStorage.setItem('resomance_router', JSON.stringify(state.router));
+    const sel = /** @type {HTMLSelectElement} */ (document.getElementById(RT_ID[src])); if (sel) sel.value = next;
+    emit('transport', { type: 'toast', msg: src + ' → ' + next });
+  }
 
   // quality preset (DPR cap + raymarch steps)
   qualSeg.addEventListener('click', (e) => {
@@ -189,6 +201,12 @@ export function initControls() {
     if (e.key === 's' || e.key === 'S') requestScreenshot();
     if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !isSeekFocused()) { e.preventDefault(); e.key === 'ArrowRight' ? pb.nextTrack() : pb.prevTrack(); }
+    // live-tweak hotkeys: cycle palette (p) and nudge router targets (k kick / n sNare / t haT / b bass); Shift reverses
+    if (e.key === 'p') cycleStyle(1); else if (e.key === 'P') cycleStyle(-1);
+    if (e.key === 'k' || e.key === 'K') cycleRouter('kick', e.shiftKey ? -1 : 1);
+    if (e.key === 'n' || e.key === 'N') cycleRouter('snare', e.shiftKey ? -1 : 1);
+    if (e.key === 't' || e.key === 'T') cycleRouter('hat', e.shiftKey ? -1 : 1);
+    if (e.key === 'b' || e.key === 'B') cycleRouter('bass', e.shiftKey ? -1 : 1);
     poke();                                         // any other key counts as activity
   });
 
