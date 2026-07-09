@@ -12,6 +12,7 @@ let srcNode = null, demoNodes = null, playing = true, isDemo = false;
 let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
 let micStream = null, micSrc = null;   // getUserMedia stream + MediaStreamSource for live mic / line-in (not monitored to speakers — avoids feedback)
 let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek state
+let curWave = null;   // downsampled peak-amplitude waveform [0..1] per bucket, for the seek-bar overview scrubber
 let abA = -1, abB = -1;   // A-B loop points in seconds (-1 = unset); armed when both >= 0 and abB > abA
 let curTrackName = '';    // current track name (per-track cue-map key)
 // per-track cue markers, persisted as { trackName: [seconds...] } so cues survive a reload
@@ -56,6 +57,16 @@ export function dropCue(){
 }
 export function clearCues(){ if(curCues.length){ curCues=[]; cueMap.delete(curTrackName); persistCues(); toast('cues cleared'); emit('transport', { type:'seekMarks' }); } }
 export function getCues(){ return curCues; }
+// ---- waveform overview: decode the PCM once, downsample to N peak-amplitude buckets (normalized) ----
+function computeWave(buf){
+  const N=200; const ch=buf.getChannelData(0); const len=ch.length;
+  const block=Math.max(1, Math.floor(len/N)); const out=new Float32Array(N);
+  for(let b=0;b<N;b++){ let mx=0; const s=b*block, e=Math.min(len, s+block); for(let i=s;i<e;i++){ const a=Math.abs(ch[i]); if(a>mx)mx=a; } out[b]=mx; }
+  let peak=0; for(let i=0;i<N;i++) if(out[i]>peak)peak=out[i];
+  if(peak>0) for(let i=0;i<N;i++) out[i]/=peak;   // normalize relative energy so the loudest bucket reads ~1
+  curWave=out;
+}
+export function getWave(){ return curWave; }
 
 // ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
@@ -101,6 +112,7 @@ function playFile(file, offset){
       if(tok!==loadToken) return;   // a newer load superseded this one
       decodeFails=0;
       curBuffer=buf; trackDur=buf.duration;
+      computeWave(buf);   // build the seek-bar waveform overview once per track
       const off=Math.max(0,Math.min(offset||0, trackDur*0.999));   // resume offset (clamped) for queue restore / seek
       startCtxTime=audio.ctx.currentTime-off;
       srcNode = audio.ctx.createBufferSource();
@@ -110,7 +122,7 @@ function playFile(file, offset){
       srcNode.start(0, off); playing=true; isDemo=false; playState();
       setTrackName(file.name);
       seekVis(true);
-      loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' });   // reload this track's cues + reset any A-B loop
+      loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' }); emit('transport', { type:'wave' });   // reload this track's cues + reset A-B + repaint the waveform
     }).catch(e=>{
       if(tok!==loadToken) return;
       toast('could not read '+file.name);

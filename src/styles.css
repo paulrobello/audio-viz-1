@@ -94,7 +94,11 @@
   input[type=color]::-webkit-color-swatch-wrapper{ padding:1px; }
   input[type=color]::-webkit-color-swatch{ border:none; border-radius:5px; }
   /* seek-bar A-B loop + cue markers (overlay on the seek range input) */
-  .seekWrap { position: relative; display: inline-flex; align-items: center; }
+  .seekWrap { position: relative; display: inline-flex; align-items: center; height: 22px; }
+  #wave { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 210px; height: 22px; border-radius: 4px; pointer-events: none; }
+  /* the seek range sits over the waveform: transparent track so the overview shows, visible thumb */
+  #seek { position: relative; background: transparent !important; }
+  #seek::-webkit-slider-runnable-track { background: transparent; }
   .seekMarks { position: absolute; left: 0; right: 0; top: 50%; height: 20px; transform: translateY(-50%); pointer-events: none; }
   .seekMark { position: absolute; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); border-radius: 1px; }
   .seekMark.ab { background: #ffd54a; box-shadow: 0 0 5px rgba(255,213,74,.85); }
