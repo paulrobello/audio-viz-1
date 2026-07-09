@@ -61,6 +61,8 @@
   .seg { display:flex; gap:0; border:1px solid rgba(150,180,255,.3); border-radius:9px; overflow:hidden; }
   .seg button { border:none; border-radius:0; padding:8px 10px; background:rgba(20,26,48,.6); font-size:11px; opacity:.7; }
   .seg button.on { background:linear-gradient(180deg,rgba(110,140,255,.45),rgba(60,90,220,.3)); opacity:1; }
+  button.tog { opacity:.55; }
+  button.tog.on { background:linear-gradient(180deg,rgba(110,140,255,.5),rgba(60,90,220,.35)); border-color:rgba(180,200,255,.6); opacity:1; }
 
   #title { font-weight: 700; letter-spacing: .18em; font-size: 13px; color: #aebeff; }
   #sub { color: #8a96c8; font-size: 11px; letter-spacing: .04em; }
@@ -139,6 +141,8 @@
         <button id="play">⏸ Pause</button>
         <button id="prev" title="previous (←)">⏮</button>
         <button id="next" title="next (→)">⏭</button>
+        <button id="shuf" class="tog" title="shuffle">⇄</button>
+        <button id="rep" class="tog" title="repeat (off / all / one)">↻</button>
         <span id="trackCount" class="label" style="margin-left:4px;"></span>
       </div>
       <div class="row" id="seekRow" style="margin-bottom:9px; display:none;">
@@ -673,6 +677,8 @@ let audioCtx=null, analyser=null, freq=null, masterVol=null;
 let srcNode=null, demoNodes=null, playing=true, isDemo=false;
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
+let repeatMode = (()=>{ const r=parseInt(localStorage.getItem('resomance_repeat'),10); return (r>=0&&r<=2)?r:1; })();   // 0=off, 1=all (default preserves the looping queue), 2=one
+let shuffleOn = localStorage.getItem('resomance_shuffle')==='1';
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
 let beat=0, snare=0, hat=0;            // spectral-flux onset impulses: kick / snare / hat
 let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adaptive onset thresholds
@@ -743,9 +749,9 @@ function playFile(file){
       decodeFails=0;
       curBuffer=buf; trackDur=buf.duration; startCtxTime=audioCtx.currentTime;
       srcNode = audioCtx.createBufferSource();
-      srcNode.buffer = buf; srcNode.loop = playlist.length<=1;   // a single file loops; a queue auto-advances
+      srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
       srcNode.connect(analyser);
-      srcNode.onended = ()=>{ if(playlist.length>1) nextTrack(); };   // natural end only — manual stops null the handler first
+      srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
       srcNode.start(); playing=true; isDemo=false; updatePlayBtn();
       setTrackName(file.name);
       showSeek(true);
@@ -771,8 +777,13 @@ function playIndex(i){
   curIdx=(i+playlist.length)%playlist.length;
   playFile(playlist[curIdx]); updateTrackCounter();
 }
-function nextTrack(){ if(playlist.length>1) playIndex(curIdx+1); }
+function randIdx(){ let r; do{ r=Math.floor(Math.random()*playlist.length); }while(r===curIdx && playlist.length>1); return r; }   // shuffle: a different track than the current one
+function nextTrack(){ if(playlist.length>1) playIndex(shuffleOn ? randIdx() : curIdx+1); }
 function prevTrack(){ if(playlist.length>1) playIndex(curIdx-1); }
+// natural end of a queue track: repeat-one loops via srcNode.loop, repeat-all advances, repeat-off stops after the last linear track
+function onTrackEnd(){ if(playlist.length<=1) return;
+  if(repeatMode===0 && !shuffleOn && curIdx===playlist.length-1){ stopSources(); playing=false; updatePlayBtn(); }
+  else nextTrack(); }
 // folder-drop traversal (webkitGetAsEntry) — flatten a directory tree into audio Files
 function readDirEntries(dir){ return new Promise(res=>{ const rd=dir.createReader(); const all=[]; (function read(){ rd.readEntries(ents=>{ if(!ents.length) return res(all); all.push(...ents); read(); }, ()=>res(all)); })(); }); }
 function entryToFile(entry){ return new Promise(res=>entry.file(f=>res(f),()=>res(null))); }
@@ -1021,7 +1032,8 @@ const playBtn=document.getElementById('play');
 function updatePlayBtn(){ playBtn.textContent = playing?'⏸ Pause':'▶ Play'; }
 playBtn.addEventListener('click', ()=>{
   if(!audioCtx){ startDemo(); return; }
-  if(playing){ audioCtx.suspend(); playing=false; } else { audioCtx.resume(); playing=true; }
+  if(playing){ audioCtx.suspend(); playing=false; }
+  else { if(!srcNode && playlist.length) playIndex(curIdx); else audioCtx.resume(); playing=true; }   // restart the track if playback stopped at queue end (repeat off)
   updatePlayBtn();
 });
 // ---------- transport: seek bar (file playback only) ----------
@@ -1035,7 +1047,8 @@ function seekTo(frac){
   if(!curBuffer||!audioCtx) return;
   const off=Math.max(0,Math.min(frac,0.999))*trackDur;
   try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
-  srcNode=audioCtx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop=true; srcNode.connect(analyser);
+  srcNode=audioCtx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || repeatMode===2; srcNode.connect(analyser);
+  srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };
   startCtxTime=audioCtx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
   srcNode.start(0, off);
 }
@@ -1048,10 +1061,16 @@ function updateSeek(){
 seekEl.addEventListener('input', ()=>{ seeking=true; if(curBuffer) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*trackDur); });
 seekEl.addEventListener('change', ()=>{ if(curBuffer) seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
 // prev / next + track counter
-const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next'), trackCountEl=document.getElementById('trackCount');
+const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next'), trackCountEl=document.getElementById('trackCount'),
+      shufBtn=document.getElementById('shuf'), repBtn=document.getElementById('rep');
 prevBtn.addEventListener('click', prevTrack);
 nextBtn.addEventListener('click', nextTrack);
-function updateTrackCounter(){ const multi=playlist.length>1; trackCountEl.textContent = multi ? (curIdx+1)+' / '+playlist.length : ''; prevBtn.disabled=nextBtn.disabled=!multi; }
+function updateTrackCounter(){ const multi=playlist.length>1; trackCountEl.textContent = multi ? (curIdx+1)+' / '+playlist.length : ''; prevBtn.disabled=nextBtn.disabled=shufBtn.disabled=repBtn.disabled=!multi; }
+function applyShufUI(){ shufBtn.classList.toggle('on', shuffleOn); }
+function applyRepUI(){ repBtn.classList.toggle('on', repeatMode!==0); repBtn.textContent = repeatMode===2 ? '↻1' : '↻'; }
+shufBtn.addEventListener('click', ()=>{ shuffleOn=!shuffleOn; localStorage.setItem('resomance_shuffle', shuffleOn?'1':'0'); applyShufUI(); toast(shuffleOn?'shuffle on':'shuffle off'); });
+repBtn.addEventListener('click', ()=>{ repeatMode=(repeatMode+1)%3; if(srcNode) srcNode.loop = playlist.length<=1 || repeatMode===2; localStorage.setItem('resomance_repeat', String(repeatMode)); applyRepUI(); toast(['repeat off','repeat all','repeat one'][repeatMode]); });
+applyShufUI(); applyRepUI();
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
 function applyModeUI(){ [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode)); }

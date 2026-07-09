@@ -18,7 +18,7 @@ UX/perf/integration. Effort is rough.
 - [ ] **Persist the full playlist queue across reloads** — Today only the last single track is cached in IndexedDB; store the whole queue (name + decoded audio) so a dropped folder survives a refresh and resumes at the right position. (effort: medium)
 
 ## Transport & playback
-- [ ] **Shuffle + repeat (one / all) transport modes** — Add the usual shuffle and repeat-one/repeat-all toggles to the playlist so long sets vary or loop as intended instead of always advancing linearly. (effort: small)
+- [x] **Shuffle + repeat (one / all) transport modes** — Add the usual shuffle and repeat-one/repeat-all toggles to the playlist so long sets vary or loop as intended instead of always advancing linearly. (effort: small)
 - [ ] **Beat-synced auto-mix** — The scene crossfade currently fires on a fixed timer; snap it to bar/beat boundaries derived from the existing BPM estimate so transitions land on the downbeat and feel musical. (effort: medium)
 
 ## Scenes & look
