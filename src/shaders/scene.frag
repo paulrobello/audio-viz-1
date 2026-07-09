@@ -11,6 +11,8 @@ uniform float u_level;
 uniform float u_centroid;
 uniform float u_beat;
 uniform float u_beatPhase;   // bar-length beat-grid phase [0..1), downbeat at 0 (locked to BPM, soft-snapped to kick onsets)
+uniform float u_key;         // estimated key pitch class 0..11 (C..B) — palette accents can follow it
+uniform float u_chroma[12];  // 12-bin pitch-class chroma vector (available to user shaders)
 uniform float u_snare;
 uniform float u_hat;
 uniform float u_shock;   // 0 at the instant of a beat, rises to 1 as the shockwave expands/fades
@@ -286,7 +288,7 @@ void main(){
   // beat-phase downbeat accent: a bar-length phase that anticipates (phase→1) and pulses on (phase→0)
   // the downbeat, so the field breathes with the grid even between detected onsets.
   float _db = 1.0 - smoothstep(0.0, 0.14, min(u_beatPhase, 1.0 - u_beatPhase));
-  col += palette(u_time*0.12 + 0.7) * _db * (0.04 + u_bass*0.12 + u_beat*0.08) * (1.0 - 0.8*u_reducedMotion);
+  col += palette(u_time*0.12 + 0.7 + u_key*0.0833) * _db * (0.04 + u_bass*0.12 + u_beat*0.08) * (1.0 - 0.8*u_reducedMotion);
 
   // circular FFT spectrum ring overlay
   if(u_specOn > 0.5){

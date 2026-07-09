@@ -93,6 +93,7 @@
         <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
         <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
         <label class="chk"><input type="checkbox" id="beatShift" /> beat-shift <span id="bpmVal" class="label">--</span></label>
+        <span class="label">key <b id="keyVal" style="color:#cdd6ff;">–</b></span>
         <label class="chk"><input type="checkbox" id="agc" /> auto-gain</label>
         <label class="chk"><input type="checkbox" id="artPal" /> album-art palette</label>
       </div>
@@ -154,7 +155,7 @@
         </div>
       </div>
       <div id="shaderPanel" style="display:none; flex-direction:column; gap:6px;">
-        <div class="label">paste a vec3 scene body — uv, u_bass, u_mid, u_treble, u_beat, u_beatPhase, u_snare, u_hat, palette(), fbm(), u_time</div>
+        <div class="label">paste a vec3 scene body — uv, u_bass, u_mid, u_treble, u_beat, u_beatPhase, u_key, u_chroma[12], u_snare, u_hat, palette(), fbm(), u_time</div>
         <textarea id="shaderCode" rows="5" style="width:100%;background:rgba(10,12,22,.8);color:#dfe6ff;border:1px solid rgba(150,180,255,.3);border-radius:8px;padding:8px;font:inherit;font-size:11px;resize:vertical;pointer-events:auto;"></textarea>
         <div class="row"><button id="shaderCompile">compile</button><span id="shaderMsg" class="label"></span></div>
       </div>

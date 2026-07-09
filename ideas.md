@@ -47,7 +47,7 @@ rough.
 - [ ] **Second-window / projection output** — Open a clean, fullscreen, UI-free copy of the canvas in a separate window (synced over `BroadcastChannel`) so a VJ can control the look from the main window while projecting the pristine viz to a second monitor or projector. (effort: large)
 
 ### Audio analysis & reactivity
-- [ ] **Mel-spaced spectrum + chromagram / key detection** — Replace the linear FFT band split with perceptual (mel/log) binning and add a chroma vector + key estimate, so palette and scene choices can follow the song's actual harmonic content and key instead of only bass/mid/treble energy. (effort: large)
+- [x] **Mel-spaced spectrum + chromagram / key detection** — Replace the linear FFT band split with perceptual (mel/log) binning and add a chroma vector + key estimate, so palette and scene choices can follow the song's actual harmonic content and key instead of only bass/mid/treble energy. (effort: large)
 - [x] **Beat-grid / beat-phase tracking** — Promote the raw BPM estimate into a running beat-phase (0..1 across the bar) exposed as a `u_beatPhase` uniform, so scenes can anticipate and pulse on the downbeat rather than only reacting after the onset fires. (effort: medium)
 
 ### Playback & library

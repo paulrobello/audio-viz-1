@@ -70,7 +70,7 @@ function frame(now) {
   // render: spectrum upload + scene + bloom + composite + (optional) screenshot + ping-pong swap
   renderFrame({ time, beatPhase, modeA: state.modeA, modeB: state.modeB, blend: state.blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active });
 
-  if (now - lastUI > 50) { lastUI = now; updateMeters(); updateSeek(); if (state.showFps) document.getElementById('fpsVal').textContent = Math.round(fpsEMA) + ' fps'; if (state.beatShiftOn && bpm) document.getElementById('bpmVal').textContent = bpm + ' bpm'; }
+  if (now - lastUI > 50) { lastUI = now; updateMeters(); updateSeek(); if (state.showFps) document.getElementById('fpsVal').textContent = Math.round(fpsEMA) + ' fps'; if (state.beatShiftOn && bpm) document.getElementById('bpmVal').textContent = bpm + ' bpm'; const kv = document.getElementById('keyVal'); if (kv) kv.textContent = audio.key.name; }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

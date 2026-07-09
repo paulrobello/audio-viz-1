@@ -20,6 +20,7 @@ function buildSceneU(p) {
     treble: uni(p, 'u_treble'), level: uni(p, 'u_level'),
     centroid: uni(p, 'u_centroid'), beat: uni(p, 'u_beat'), shock: uni(p, 'u_shock'),
     beatPhase: uni(p, 'u_beatPhase'),
+    key: uni(p, 'u_key'), chroma: uni(p, 'u_chroma[0]'),
     snare: uni(p, 'u_snare'), hat: uni(p, 'u_hat'),
     style: uni(p, 'u_style'), modeA: uni(p, 'u_modeA'), modeB: uni(p, 'u_modeB'), blend: uni(p, 'u_blend'),
     camYaw: uni(p, 'u_camYaw'), camPitch: uni(p, 'u_camPitch'), orbit: uni(p, 'u_orbit'), zoom: uni(p, 'u_zoom'),
@@ -102,6 +103,7 @@ export function renderFrame(params) {
   gl.uniform1f(U.treble, audio.bands.treble); gl.uniform1f(U.level, audio.bands.level);
   gl.uniform1f(U.centroid, audio.bands.centroid); gl.uniform1f(U.beat, reducedMotion ? audio.beat * 0.2 : audio.beat);
   gl.uniform1f(U.beatPhase, params.beatPhase);
+  gl.uniform1f(U.key, audio.key.pc); if (U.chroma) gl.uniform1fv(U.chroma, audio.chroma);   // chroma vector + estimated key for harmony-aware scenes
   gl.uniform1f(U.shock, reducedMotion ? Math.min(1, (time - params.shock) / 0.6) * 0.15 : Math.min(1, (time - params.shock) / 0.6));
   gl.uniform1f(U.snare, reducedMotion ? audio.snare * 0.2 : audio.snare); gl.uniform1f(U.hat, reducedMotion ? audio.hat * 0.2 : audio.hat);
   gl.uniform1f(U.paletteShift, params.paletteShift);
