@@ -4,35 +4,33 @@ Work each idea on its own feature branch (see /idea-next).
 Commit all work after marking an idea done.
 </instructions>
 
-# RESOMANCE — Enhancement Ideas
+# RESOMANCE — Enhancement Ideas (Batch 2)
 
-Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. Mix of audio-input, capture, scene/look, transport, performance, and packaging work. Effort is rough.
+Ideas for extending the audio-reactive WebGL2 visualizer in `index.html`. The
+first batch (playlist, seek bar, bloom, orbit camera, onset detection, palette
+editor, PWA, etc.) shipped and is preserved in git history — this list builds on
+top of that and intentionally avoids re-suggesting anything already implemented.
+Grouped by audio sources, transport, capture, scenes/look, analysis, and
+UX/perf/integration. Effort is rough.
 
 ## Audio sources
-- [x] **Playlist & next/previous** — Accept multiple files or a dropped folder, build a queue, and add skip-forward/back controls (and `←`/`→` keys) so a full set can run without manual reloads. (effort: medium)
+- [ ] **Load audio from a URL or stream** — Accept a pasted URL (or internet-radio stream) in addition to local files, wired via `<audio>` + `MediaElementSource` into the analyser so online tracks and live streams drive the viz without a download. (effort: medium)
+- [ ] **Persist the full playlist queue across reloads** — Today only the last single track is cached in IndexedDB; store the whole queue (name + decoded audio) so a dropped folder survives a refresh and resumes at the right position. (effort: medium)
 
 ## Transport & playback
-- [x] **Seek bar + elapsed/remaining time** — Show a scrubable progress bar with current/total time for file playback; today audio loops silently with no transport UI. Requires tracking the `BufferSource` playback offset. (effort: medium)
-- [x] **Persist scene, palette & ring across reloads** — Volume already persists via `localStorage`; extend it to remember last scene, palette, ring toggle, and idle-hide so reloads resume the exact look. (effort: small)
-
-## Capture & presentation
-- [x] **Screenshot hotkey (PNG)** — `S` key grabs the current rendered frame straight off the canvas to a PNG download. (effort: small)
-- [x] **Fullscreen mode** — `F` key toggles the Fullscreen API for clean projector/stage presentation. (effort: small)
-- [x] **PWA: installable + offline** — Add a web manifest and a tiny service worker so the (already self-contained, dependency-free) app installs and runs fully offline. (effort: medium)
-- [x] **Open Graph / share metadata** — Add OG/Twitter tags and a preview image so links render richly when shared. (effort: small)
+- [ ] **Shuffle + repeat (one / all) transport modes** — Add the usual shuffle and repeat-one/repeat-all toggles to the playlist so long sets vary or loop as intended instead of always advancing linearly. (effort: small)
+- [ ] **Beat-synced auto-mix** — The scene crossfade currently fires on a fixed timer; snap it to bar/beat boundaries derived from the existing BPM estimate so transitions land on the downbeat and feel musical. (effort: medium)
 
 ## Scenes & look
-- [x] **Auto-mix / scene cycling** — Optionally crossfade or cut between scenes on beat boundaries (or a timer) so long sessions stay dynamic. Needs a blend mode in the shader or a smooth lerp between two rendered scenes. (effort: large)
-- [x] **Adjustable feedback & look controls** — Expose currently hardcoded constants — feedback decay (`0.90`), swirl angle, glow/zoom — as sliders in a collapsible "look" panel, persisted like volume. (effort: medium)
-- [x] **Bloom post-process pass** — Insert a bright-pass + blur bloom pass between the scene and copy shaders for punchier glow on bright hits, intensified on beats. (effort: large)
-- [x] **Custom palette editor** — Let users edit the cosine-palette `a/b/c/d` vectors with color pickers and save their own palette to `localStorage`, beyond the four built-ins. (effort: medium)
-- [x] **Orbit camera for the raymarch scenes** — Mouse-drag to orbit/pan the Fractal (and Tunnel) camera so users can explore the field interactively instead of the fixed auto-camera. (effort: large)
+- [ ] **Custom user-shader scene** — Add a 5th scene powered by user-pasted GLSL that receives the same audio uniforms (`u_bass`, `u_mid`, `u_treble`, `u_beat`, `u_snare`, `u_hat`, `palette()`), with compile-error reporting, so anyone can drop in their own fragment shader. (effort: large)
+- [ ] **Additional raymarched scene** — Add a new scene such as an audio-reactive particle galaxy or a scrolling frequency-bar terrain to expand the four current fields (Fractal/Tunnel/Plasma/Vortex) and give auto-mix more variety. (effort: large)
+- [ ] **Post-FX toggles (vignette / chromatic aberration / film grain)** — Extend the copy/tonemap pass with optional, beat-reactive vignette, chromatic aberration, and film-grain controls in the existing "look" panel for a graded, cinematic finish. (effort: medium)
+- [ ] **Per-scene palette memory** — Remember a separate palette choice per scene so switching scenes keeps each one's intended mood, rather than one global palette across all four. (effort: small)
 
-## Audio analysis
-- [x] **Onset detection across bands** — Replace the single bass-energy-flux beat detector with spectral-flux onset detection split into kick/snare/hat, feeding distinct uniforms (`u_snare`, `u_hat`) for richer reactivity. (effort: medium)
-- [x] **Beat-aware palette shifting** — Bias or rotate the palette based on detected tempo and energy so the mood evolves with the music instead of staying fixed per manual selection. (effort: medium)
+## Audio analysis & reactivity
+- [ ] **Auto-gain / reactivity calibration** — Normalize bass/mid/treble against a rolling loudness estimate so both quiet and loud tracks react at full range, instead of today's fixed thresholds under/over-triggering depending on the master level. (effort: medium)
+- [ ] **Reactivity router (map kick/snare/hat to visuals)** — The `u_snare`/`u_hat` uniforms are detected but barely wired; add a small mapping UI so users can route kick/snare/hat/bass to chosen visual params (e.g. snare→swirl, hat→glow, kick→shockwave intensity). (effort: medium)
 
-## UX, performance & accessibility
-- [x] **Render-scale / quality toggle + FPS meter** — Expose a Low/Med/High quality control (DPR cap and raymarch step counts are currently hardcoded) and an optional debug FPS counter so it runs on lower-end GPUs. (effort: medium)
-- [x] **`prefers-reduced-motion` mode** — Respect the OS reduced-motion setting by slowing/disabling the heavy swirl, feedback trails, and beat flashes for accessibility. (effort: small)
-- [x] **Keyboard cheat-sheet overlay** — `?` opens a clean overlay listing every shortcut (scenes, play/pause, ring, fullscreen, screenshot) since today hints are only in a fading footer. (effort: small)
+## UX, performance & integration
+- [ ] **Named look presets / snapshot slots** — Save and recall the full visual state (scene + palette + look sliders + toggles) into named slots switchable with keys, so polished looks can be queued and recalled during a set. (effort: medium)
+- [ ] **Mobile / touch polish** — Make the HUD responsive with larger hit targets, add pinch-to-zoom and two-finger orbit gestures alongside the existing pointer-drag camera, so the viz is usable on phones/tablets, not just desktop Chromium. (effort: medium)
