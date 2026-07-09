@@ -61,7 +61,7 @@ function frame(now) {
     if (!state.mixTrans && state.mixArmedAt === null && time >= state.autoMixNext) state.mixArmedAt = time;   // arm: hold for the next beat
     if (!state.mixTrans && state.mixArmedAt !== null) {
       const armWait = (bpm >= 40 && bpm <= 200) ? Math.min(3.0, 2.2 * 60 / bpm) : 3.0;   // fire on a beat, or fall back after ~2 beats (3s if no BPM)
-      if (beatPulse || time - state.mixArmedAt >= armWait) { const to = (state.curMode + 1) % 6; state.mixTrans = { from: state.curMode, to, start: time }; state.modeA = state.curMode; state.modeB = to; state.mixArmedAt = null; } }
+      if (beatPulse || time - state.mixArmedAt >= armWait) { const to = (state.curMode + 1) % 7; state.mixTrans = { from: state.curMode, to, start: time }; state.modeA = state.curMode; state.modeB = to; state.mixArmedAt = null; } }
     if (state.mixTrans) { const k = Math.max(0, Math.min(1, (time - state.mixTrans.start) / state.autoMixDur)); state.blend = k;
       if (!state.mixTrans.palDone && k >= 0.5) { state.mixTrans.palDone = true; applyScenePalette(state.mixTrans.to); }   // swap to the destination scene's palette at the crossfade midpoint
       if (k >= 1) { state.curMode = state.mixTrans.to; state.modeA = state.modeB = state.curMode; state.blend = 0; state.mixTrans = null; state.autoMixNext = time + state.autoMixInterval; applyModeUI(); } }

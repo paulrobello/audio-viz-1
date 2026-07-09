@@ -258,6 +258,31 @@ vec3 sceneTerrain(vec2 uv){
   return col;
 }
 
+// ---------- scene 6: audio-reactive particle galaxy (procedural log-spiral star field, spectrum-driven) ----------
+vec3 sceneGalaxy(vec2 uv){
+  vec2 p = uv; p *= rot(u_time*0.03 + u_mid*0.10);   // slow overall drift
+  float r = length(p);
+  float spec = texture(u_spec, vec2(fract(r*0.4 + u_time*0.10), 0.5)).r;   // spectrum read once, indexed by radius
+  vec3 col = exp(-r*4.0) * palette(0.2) * (0.4 + u_bass*1.6);              // glowing core, bass-reactive
+  const int N = 64;
+  for(int i=0;i<N;i++){
+    float fi = float(i);
+    float h1 = hash21(vec2(fi*1.37, 7.1));
+    float h2 = hash21(vec2(fi*2.83, 3.3));
+    float h3 = hash21(vec2(fi*5.11, 1.7));
+    float sr = 0.12 + h1*1.15;                                            // star radius from center
+    float arm = floor(h2*3.0);                                            // one of three spiral arms
+    float ang = sr*3.5 + arm*2.094 + h3*0.5 - u_time*(0.35 + u_mid*0.6)/(sr + 0.25);   // log spiral + differential rotation
+    vec2 sp = vec2(cos(ang), sin(ang)) * sr;
+    float d = length(p - sp);
+    float tw = 0.55 + 0.45*sin(u_time*3.0 + h1*40.0);                     // twinkle
+    col += exp(-d*d*200.0) * tw * palette(h1*0.6 + u_time*0.04) * (0.5 + spec*1.8 + u_treble*1.2 + u_beat*0.5);
+  }
+  col += palette(u_time*0.10 + 0.3) * u_beat * 0.12 * exp(-r*1.8);        // beat flash
+  col *= 1.0 + u_level*0.3;
+  return col;
+}
+
 // ---------- scene 5: user-pasted shader (body replaced at runtime; compile errors reported in the UI) ----------
 vec3 sceneUser(vec2 uv){
   // USER_SHADER_BEGIN
@@ -271,7 +296,8 @@ vec3 sceneById(float id, vec2 uv){
   else if(id < 2.5) return scenePlasma(uv);
   else if(id < 3.5) return sceneVortex(uv);
   else if(id < 4.5) return sceneTerrain(uv);
-  else              return sceneUser(uv);
+  else if(id < 5.5) return sceneUser(uv);
+  else              return sceneGalaxy(uv);
 }
 
 void main(){

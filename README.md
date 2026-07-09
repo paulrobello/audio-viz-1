@@ -4,7 +4,7 @@ A mind-bending, audio-reactive visualizer that runs entirely in the browser via
 WebGL2. It analyzes a local audio file, a pasted URL/stream, or a built-in synthetic
 demo and drives GPU-rendered scenes — a kaleidoscopic fractal field, an epic
 hyperspace-warp tunnel, liquid plasma, a spiral vortex, an audio-reactive
-terrain, and a user-pasted shader — with phosphor-style feedback trails, a
+terrain, an audio-reactive particle galaxy, and a user-pasted shader — with phosphor-style feedback trails, a
 circular FFT spectrum ring, beat detection, and a master volume control.
 
 The **Tunnel** scene raymarches a coiling, serpentine bore: ribbed neon walls

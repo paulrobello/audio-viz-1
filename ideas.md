@@ -59,7 +59,7 @@ rough.
 
 ### Scenes & look
 - [x] **Per-scene look params** — Extend per-scene memory from palette alone to the full look-slider set (feedback / swirl / glow / vignette / chroma / grain), so each scene keeps its own tuned feel rather than sharing one global look. (effort: small)
-- [ ] **Audio-reactive particle / galaxy scene (7th scene)** — Add a GPU-instanced particle field (star swirl / galaxy) driven by the spectrum texture, giving auto-mix a distinctly different aesthetic alongside the raymarched scenes. (effort: large)
+- [x] **Audio-reactive particle / galaxy scene (7th scene)** — Add a GPU-instanced particle field (star swirl / galaxy) driven by the spectrum texture, giving auto-mix a distinctly different aesthetic alongside the raymarched scenes. (effort: large)
 
 ### UX & platform
 - [x] **Hotkeys for palette + reactivity router** — Add keyboard shortcuts to cycle palettes and nudge router mappings without opening the look panel, rounding out the existing scene/preset hotkeys for fast live tweaking. (effort: small)

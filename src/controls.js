@@ -262,7 +262,7 @@ export function initControls() {
     if (e.code === 'Space') { e.preventDefault(); pb.togglePlay(); }
     if (e.key === 'h' || e.key === 'H') { toggleHideKey(); return; }
     if (e.shiftKey && e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10); if (n >= 1 && n <= 8) { e.preventDefault(); if (e.ctrlKey || e.metaKey) savePreset(n - 1); else recallPreset(n - 1); return; } }
-    if (e.key >= '1' && e.key <= '6') setMode(parseInt(e.key, 10) - 1);
+    if (e.key >= '1' && e.key <= '7') setMode(parseInt(e.key, 10) - 1);
     if (e.key === 'r' || e.key === 'R') setRing(!state.ringOn);
     if (e.key === 's' || e.key === 'S') requestScreenshot();
     if (e.key === 'f' || e.key === 'F') toggleFullscreen();

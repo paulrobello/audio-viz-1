@@ -14,7 +14,7 @@ const LS = (k, def, validate) => {
 // curMode/curStyle/scenePalette seeded from their current localStorage keys + validators.
 export const state = {
   bootT0: performance.now(),   // single shared epoch for all frame/interval clocks (state.js evaluates first — every module imports it)
-  curMode: LS('resomance_scene', 0, (n) => Number.isInteger(n) && n >= 0 && n <= 5),
+  curMode: LS('resomance_scene', 0, (n) => Number.isInteger(n) && n >= 0 && n <= 6),
   curStyle: 0, // set below from scenePalette
   scenePalette: (() => {
     let a;
@@ -24,7 +24,7 @@ export const state = {
       const v = lg >= 0 && lg <= 4 ? lg : 0;
       a = [v, v, v, v];
     }
-    while (a.length < 6) a.push(0);
+    while (a.length < 7) a.push(0);
     return a.map(Number);
   })(),
   look: Object.assign(
@@ -41,7 +41,7 @@ export const state = {
     let arr = null;
     try { arr = JSON.parse(localStorage.getItem('resomance_scene_look') ?? 'null'); } catch (_) {}
     const out = [];
-    for (let i = 0; i < 6; i++) out.push(Object.assign({}, base, gl, Array.isArray(arr) && arr[i] ? arr[i] : {}));
+    for (let i = 0; i < 7; i++) out.push(Object.assign({}, base, gl, Array.isArray(arr) && arr[i] ? arr[i] : {}));
     return out;
   })(),
   router: Object.assign(
