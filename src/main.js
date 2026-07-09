@@ -4,94 +4,16 @@
 // type-checked; this per-file opt-out exists only until the code below is decomposed.
 // Removed by Task 10, when main.js is a small, fully-typed boot + frame-loop file.
 import './styles.css';
-import vsSrc from './shaders/quad.vert';
-import fsScene from './shaders/scene.frag';
-import fsCopy from './shaders/copy.frag';
-import fsBright from './shaders/bright.frag';
-import fsBlur from './shaders/blur.frag';
 import { state, on } from './state.js';
 import { audio, analyze } from './audio.js';
 import * as pb from './playback.js';
+import { gl, vao, targets, programs, specTex, specData, NBINS, resize, setQuality, rebuildSceneProgram, getQual, fsScene } from './gl.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
 
 const canvas = document.getElementById('gl');
-const gl = canvas.getContext('webgl2', { antialias:false, alpha:false });
-if(!gl){ fatal('WebGL2 is not available. Try Safari or Chrome on Apple Silicon.'); throw new Error('no webgl2'); }
-
-function compile(type, src){
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src.trim()); gl.compileShader(s);
-  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('Shader compile error:\n'+gl.getShaderInfoLog(s));
-  return s;
-}
-function program(vsSrc, fsSrc){
-  const p = gl.createProgram();
-  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
-  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
-  gl.bindAttribLocation(p, 0, 'a_pos');
-  gl.linkProgram(p);
-  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('Link error:\n'+gl.getProgramInfoLog(p));
-  return p;
-}
-let progScene, progCopy, progBright, progBlur;
-try {
-  progScene = program(vsSrc, fsScene);
-  progCopy  = program(vsSrc, fsCopy);
-  progBright = program(vsSrc, fsBright);
-  progBlur   = program(vsSrc, fsBlur);
-} catch(e){ fatal(e.message); throw e; }
-
-const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-// ping-pong framebuffers (scene feedback + half-res bloom buffers)
-let texA, texB, fboA, fboB, bloomTexA, bloomTexB, bloomFboA, bloomFboB, BW=0, BH=0;
-function makeTarget(w,h){
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  const fbo = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-  return { tex, fbo };
-}
-let W=0, H=0;
-// quality presets: DPR cap + raymarch step count (Low / Med / High)
-const QUAL=[ {dpr:1.0, rmSteps:48}, {dpr:1.5, rmSteps:80}, {dpr:2.0, rmSteps:120} ];
-let qualIdx = state.qualIdx;
-let qual = QUAL[qualIdx];
-function resize(){
-  const dpr = Math.min(window.devicePixelRatio || 1, qual.dpr);
-  const w = Math.floor(window.innerWidth*dpr), h = Math.floor(window.innerHeight*dpr);
-  if(w===W && h===H) return;
-  W=w; H=h; canvas.width=w; canvas.height=h;
-  const a=makeTarget(w,h), b=makeTarget(w,h);
-  texA=a.tex; fboA=a.fbo; texB=b.tex; fboB=b.fbo;
-  BW=Math.max(1,Math.floor(w/2)); BH=Math.max(1,Math.floor(h/2));   // bloom at half resolution
-  const ba=makeTarget(BW,BH), bb=makeTarget(BW,BH);
-  bloomTexA=ba.tex; bloomFboA=ba.fbo; bloomTexB=bb.tex; bloomFboB=bb.fbo;
-  for(const f of [fboA,fboB,bloomFboA,bloomFboB]){ gl.bindFramebuffer(gl.FRAMEBUFFER,f); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
-}
-window.addEventListener('resize', resize); resize();
-
-// FFT spectrum texture (256 bins, R8)
-const NBINS = 256;
-const specTex = gl.createTexture();
-gl.bindTexture(gl.TEXTURE_2D, specTex);
-gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NBINS, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(NBINS));
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-let specData = new Uint8Array(NBINS);
+window.addEventListener('resize', resize);   // gl.js performs the initial resize() at module load
 
 function uni(p,n){ return gl.getUniformLocation(p,n); }
 function buildSceneU(p){
@@ -111,10 +33,10 @@ function buildSceneU(p){
     paletteShift:uni(p,'u_paletteShift'),
   };
 }
-let U = buildSceneU(progScene);   // rebuilt (buildSceneU) whenever the scene program is recompiled for a user shader
-const UC = { tex:uni(progCopy,'u_tex'), bloom:uni(progCopy,'u_bloom'), res:uni(progCopy,'u_res'), bloomAmt:uni(progCopy,'u_bloomAmt'), vig:uni(progCopy,'u_vig'), ca:uni(progCopy,'u_ca'), grain:uni(progCopy,'u_grain'), beat:uni(progCopy,'u_beat'), time:uni(progCopy,'u_time') };
-const UB = { tex:uni(progBright,'u_tex'), res:uni(progBright,'u_res'), thresh:uni(progBright,'u_thresh') };
-const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(progBlur,'u_dir') };
+let U = buildSceneU(programs.scene);   // rebuilt (buildSceneU) whenever the scene program is recompiled for a user shader
+const UC = { tex:uni(programs.copy,'u_tex'), bloom:uni(programs.copy,'u_bloom'), res:uni(programs.copy,'u_res'), bloomAmt:uni(programs.copy,'u_bloomAmt'), vig:uni(programs.copy,'u_vig'), ca:uni(programs.copy,'u_ca'), grain:uni(programs.copy,'u_grain'), beat:uni(programs.copy,'u_beat'), time:uni(programs.copy,'u_time') };
+const UB = { tex:uni(programs.bright,'u_tex'), res:uni(programs.bright,'u_res'), thresh:uni(programs.bright,'u_thresh') };
+const UBL = { tex:uni(programs.blur,'u_tex'), res:uni(programs.blur,'u_res'), dir:uni(programs.blur,'u_dir') };
 
 // ---------- transport bus: playback.js → view (UI updates that used to be inline) ----------
 on('transport', (e) => {
@@ -191,14 +113,14 @@ function frame(now){
   gl.bindTexture(gl.TEXTURE_2D, specTex);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NBINS, 1, gl.RED, gl.UNSIGNED_BYTE, specData);
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
-  gl.viewport(0,0,W,H);
-  gl.useProgram(progScene); gl.bindVertexArray(vao);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texA);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.fboB);
+  gl.viewport(0,0,targets.W,targets.H);
+  gl.useProgram(programs.scene); gl.bindVertexArray(vao);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texA);
   gl.uniform1i(U.prev,0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, specTex);
   gl.uniform1i(U.spec,1);
-  gl.uniform2f(U.res,W,H); gl.uniform1f(U.time,time);
+  gl.uniform2f(U.res,targets.W,targets.H); gl.uniform1f(U.time,time);
   gl.uniform1f(U.bass,audio.bands.bass); gl.uniform1f(U.mid,audio.bands.mid);
   gl.uniform1f(U.treble,audio.bands.treble); gl.uniform1f(U.level,audio.bands.level);
   gl.uniform1f(U.centroid,audio.bands.centroid); gl.uniform1f(U.beat, reducedMotion?audio.beat*0.2:audio.beat);
@@ -213,37 +135,37 @@ function frame(now){
   let rSw=0,rGl=0,rFb=0; const rv={kick:audio.beat,snare:audio.snare,hat:audio.hat,bass:audio.bands.bass};
   for(const s in router){ const v=rv[s]||0; if(router[s]==='swirl') rSw+=v; else if(router[s]==='glow') rGl+=v; else if(router[s]==='feedback') rFb+=v; }
   gl.uniform1f(U.feedback, Math.max(0,Math.min(0.97,look.feedback+rFb*0.04))); gl.uniform1f(U.swirl, Math.max(0,Math.min(0.02,look.swirl+rSw*0.008))); gl.uniform1f(U.glow, Math.max(0,Math.min(0.3,look.glow+rGl*0.12)));
-  gl.uniform1i(U.rmSteps, qual.rmSteps);
+  gl.uniform1i(U.rmSteps, getQual().rmSteps);
   gl.uniform3f(U.pa, customPal.a[0],customPal.a[1],customPal.a[2]); gl.uniform3f(U.pb, customPal.b[0],customPal.b[1],customPal.b[2]);
   gl.uniform3f(U.pc, customPal.c[0],customPal.c[1],customPal.c[2]); gl.uniform3f(U.pd, customPal.d[0],customPal.d[1],customPal.d[2]);
   gl.drawArrays(gl.TRIANGLES,0,3);
 
   // --- bloom: bright-pass into a half-res buffer ---
-  gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboA);
-  gl.viewport(0,0,BW,BH);
-  gl.useProgram(progBright);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texB);
-  gl.uniform1i(UB.tex,0); gl.uniform2f(UB.res,W,H); gl.uniform1f(UB.thresh, 0.6);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboA);
+  gl.viewport(0,0,targets.BW,targets.BH);
+  gl.useProgram(programs.bright);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
+  gl.uniform1i(UB.tex,0); gl.uniform2f(UB.res,targets.W,targets.H); gl.uniform1f(UB.thresh, 0.6);
   gl.drawArrays(gl.TRIANGLES,0,3);
   // --- bloom: separable 9-tap Gaussian, two horizontal/vertical rounds ---
-  gl.useProgram(progBlur);
+  gl.useProgram(programs.blur);
   for(let pass=0; pass<2; pass++){
-    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboB);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
-    gl.uniform1i(UBL.tex,0); gl.uniform2f(UBL.res,BW,BH); gl.uniform2f(UBL.dir, 1.0/Math.max(1,BW), 0.0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboB);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexA);
+    gl.uniform1i(UBL.tex,0); gl.uniform2f(UBL.res,targets.BW,targets.BH); gl.uniform2f(UBL.dir, 1.0/Math.max(1,targets.BW), 0.0);
     gl.drawArrays(gl.TRIANGLES,0,3);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboA);
-    gl.bindTexture(gl.TEXTURE_2D, bloomTexB);
-    gl.uniform2f(UBL.dir, 0.0, 1.0/Math.max(1,BH));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboA);
+    gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexB);
+    gl.uniform2f(UBL.dir, 0.0, 1.0/Math.max(1,targets.BH));
     gl.drawArrays(gl.TRIANGLES,0,3);
   }
   // --- composite: scene + blurred bloom, tonemapped to screen (intensified on beats) ---
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.viewport(0,0,W,H);
-  gl.useProgram(progCopy);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texB);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
-  gl.uniform1i(UC.tex,0); gl.uniform1i(UC.bloom,1); gl.uniform2f(UC.res,W,H);
+  gl.viewport(0,0,targets.W,targets.H);
+  gl.useProgram(programs.copy);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexA);
+  gl.uniform1i(UC.tex,0); gl.uniform1i(UC.bloom,1); gl.uniform2f(UC.res,targets.W,targets.H);
   gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion?audio.beat*0.2:audio.beat*1.1));
   gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion?audio.beat*0.2:audio.beat); gl.uniform1f(UC.time, time);
   gl.drawArrays(gl.TRIANGLES,0,3);
@@ -253,7 +175,7 @@ function frame(now){
       a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }, 'image/png');
     toast('screenshot saved'); }
 
-  let t2=texA; texA=texB; texB=t2; let f2=fboA; fboA=fboB; fboB=f2;
+  let t2=targets.texA; targets.texA=targets.texB; targets.texB=t2; let f2=targets.fboA; targets.fboA=targets.fboB; targets.fboB=f2;
   if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); if(showFps) fpsVal.textContent=Math.round(fpsEMA)+' fps'; if(beatShiftOn&&bpm) bpmVal.textContent=bpm+' bpm'; }
   requestAnimationFrame(frame);
 }
@@ -380,8 +302,7 @@ function compileUserShader(){
   const code=shaderCode.value;
   const src=fsScene.replace(/\/\/ USER_SHADER_BEGIN[\s\S]*?\/\/ USER_SHADER_END/, '// USER_SHADER_BEGIN\n'+code+'\n  // USER_SHADER_END');
   try{
-    const p=program(vsSrc, src);
-    gl.deleteProgram(progScene); progScene=p; U=buildSceneU(p);
+    rebuildSceneProgram(src); U=buildSceneU(programs.scene);
     localStorage.setItem('resomance_usershader', code);
     shaderMsg.textContent='compiled ✓'; shaderMsg.style.color='#7fd0a0'; shaderCode.title='';
   }catch(e){
@@ -402,11 +323,9 @@ const RT_OPTS=['none','swirl','glow','feedback'];
 });
 // quality preset (DPR cap + raymarch steps) + FPS meter
 const qualSeg=document.getElementById('qualSeg');
-function setQuality(i){ qualIdx=i; qual=QUAL[i]; localStorage.setItem('resomance_quality', String(i));
-  [...qualSeg.children].forEach(b=>b.classList.toggle('on', parseInt(b.dataset.q,10)===i));
-  W=H=0; resize(); }   // force re-alloc of render targets at the new DPR
-qualSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-q]'); if(b) setQuality(parseInt(b.dataset.q,10)); });
-[...qualSeg.children].forEach(b=>b.classList.toggle('on', parseInt(b.dataset.q,10)===qualIdx));
+qualSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-q]'); if(b){ setQuality(parseInt(b.dataset.q,10));
+  [...qualSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.q,10)===state.qualIdx)); } });
+[...qualSeg.children].forEach(b=>b.classList.toggle('on', parseInt(b.dataset.q,10)===state.qualIdx));
 const fpsChk=document.getElementById('fpsChk'), fpsVal=document.getElementById('fpsVal');
 let showFps = state.showFps;
 fpsChk.checked=showFps; if(!showFps) fpsVal.textContent='';
