@@ -10,6 +10,7 @@ import fsCopy from './shaders/copy.frag';
 import fsBright from './shaders/bright.frag';
 import fsBlur from './shaders/blur.frag';
 import { state } from './state.js';
+import { audio, ensureCtx, analyze } from './audio.js';
 import { idbGetQueue, idbSaveQueue, idbSavePos, idbGetPos, idbGetAudio } from './storage.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
@@ -116,23 +117,17 @@ const UB = { tex:uni(progBright,'u_tex'), res:uni(progBright,'u_res'), thresh:un
 const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(progBlur,'u_dir') };
 
 // ---------- AUDIO ----------
-let audioCtx=null, analyser=null, freq=null, masterVol=null;
 let srcNode=null, demoNodes=null, playing=true, isDemo=false;
 let urlAudio=null, urlMes=null;   // <audio> + MediaElementSource for URL / live-stream playback
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
 let repeatMode = state.repeatMode;   // 0=off, 1=all (default preserves the looping queue), 2=one
 let shuffleOn = state.shuffleOn;
-const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
-let beat=0, snare=0, hat=0;            // spectral-flux onset impulses: kick / snare / hat
-let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adaptive onset thresholds
-let loudEMA=0.1;   // rolling loudness estimate for auto-gain
-let autoGainOn = state.autoGainOn;   // normalize bands so quiet and loud tracks react at full range
 
 // ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 let pendingRestore=null;   // {files, idx, pos} restored on first gesture
 function setTrackName(name){ document.getElementById('sub').textContent=name; }
-function currentElapsed(){ if(!curBuffer||!audioCtx) return 0; return Math.max(0,(audioCtx.currentTime-startCtxTime)%trackDur); }
+function currentElapsed(){ if(!curBuffer||!audio.ctx) return 0; return Math.max(0,(audio.ctx.currentTime-startCtxTime)%trackDur); }
 function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
 (async function(){
@@ -144,23 +139,6 @@ function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({
 setInterval(()=>saveQueuePos(), 5000);   // checkpoint playback position periodically
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveQueuePos(); });
 window.addEventListener('beforeunload', saveQueuePos);
-
-function ensureCtx(){
-  if(!audioCtx){
-    // @ts-expect-error window.webkitAudioContext is a legacy Safari-prefixed API absent from the TS DOM lib
-    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.82;
-    freq = new Uint8Array(analyser.frequencyBinCount);
-    masterVol = audioCtx.createGain();
-    masterVol.gain.value = state.volume;
-    // analyser taps the FULL pre-volume signal so the viz stays full at any listening level
-    analyser.connect(masterVol);
-    masterVol.connect(audioCtx.destination);
-  }
-  if(audioCtx.state==='suspended') audioCtx.resume();
-}
 
 function stopSources(){
   if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
@@ -174,15 +152,15 @@ function playFile(file, offset){
   const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
   const reader = new FileReader();
   reader.onload = () => {
-    audioCtx.decodeAudioData(reader.result.slice(0)).then(buf=>{
+    audio.ctx.decodeAudioData(reader.result.slice(0)).then(buf=>{
       if(tok!==loadToken) return;   // a newer load superseded this one
       decodeFails=0;
       curBuffer=buf; trackDur=buf.duration;
       const off=Math.max(0,Math.min(offset||0, trackDur*0.999));   // resume offset (clamped) for queue restore / seek
-      startCtxTime=audioCtx.currentTime-off;
-      srcNode = audioCtx.createBufferSource();
+      startCtxTime=audio.ctx.currentTime-off;
+      srcNode = audio.ctx.createBufferSource();
       srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
-      srcNode.connect(analyser);
+      srcNode.connect(audio.analyser);
       srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
       srcNode.start(0, off); playing=true; isDemo=false; updatePlayBtn();
       setTrackName(file.name);
@@ -200,12 +178,12 @@ function playFile(file, offset){
 function playUrl(url){
   ensureCtx(); stopSources();
   try{
-    const audio=new Audio();
-    audio.crossOrigin='anonymous';   // required so the analyser can read the stream (CORS-enabled sources only)
-    audio.src=url; audio.loop=true;   // loop finite URLs; live streams ignore loop
-    urlMes=audioCtx.createMediaElementSource(audio); urlMes.connect(analyser);
-    urlAudio=audio; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
-    audio.play().then(()=>{ playing=true; isDemo=false; updatePlayBtn(); setTrackName(url.length>52?url.slice(0,52)+'…':url); showSeek(false); updateTrackCounter(); })
+    const audioEl=new Audio();
+    audioEl.crossOrigin='anonymous';   // required so the analyser can read the stream (CORS-enabled sources only)
+    audioEl.src=url; audioEl.loop=true;   // loop finite URLs; live streams ignore loop
+    urlMes=audio.ctx.createMediaElementSource(audioEl); urlMes.connect(audio.analyser);
+    urlAudio=audioEl; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
+    audioEl.play().then(()=>{ playing=true; isDemo=false; updatePlayBtn(); setTrackName(url.length>52?url.slice(0,52)+'…':url); showSeek(false); updateTrackCounter(); })
       .catch(()=>{ toast('could not play URL'); stopSources(); });
   }catch(e){ toast('could not play URL'); }
 }
@@ -241,84 +219,46 @@ async function collectEntries(entries){ const out=[];
 
 function startDemo(){
   ensureCtx(); stopSources();
-  const mix = audioCtx.createGain(); mix.gain.value = 0.0;
-  mix.connect(analyser);
+  const mix = audio.ctx.createGain(); mix.gain.value = 0.0;
+  mix.connect(audio.analyser);
   const oscs=[]; const roots=[55,82.4,110,164.8];
   roots.forEach((f,i)=>{
-    const o=audioCtx.createOscillator(); o.type=i%2?'sawtooth':'triangle';
+    const o=audio.ctx.createOscillator(); o.type=i%2?'sawtooth':'triangle';
     o.frequency.value=f; o.detune.value=(i-1.5)*8;
-    const g=audioCtx.createGain(); g.gain.value=0.18/(i+1);
+    const g=audio.ctx.createGain(); g.gain.value=0.18/(i+1);
     o.connect(g); g.connect(mix); o.start(); oscs.push(o);
   });
-  const nb=audioCtx.createBuffer(1,audioCtx.sampleRate*2,audioCtx.sampleRate);
+  const nb=audio.ctx.createBuffer(1,audio.ctx.sampleRate*2,audio.ctx.sampleRate);
   const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1)*0.5;
-  const noise=audioCtx.createBufferSource(); noise.buffer=nb; noise.loop=true;
-  const hp=audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
-  const ng=audioCtx.createGain(); ng.gain.value=0.05;
+  const noise=audio.ctx.createBufferSource(); noise.buffer=nb; noise.loop=true;
+  const hp=audio.ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
+  const ng=audio.ctx.createGain(); ng.gain.value=0.05;
   noise.connect(hp); hp.connect(ng); ng.connect(mix); noise.start();
-  const lfo=audioCtx.createOscillator(); lfo.frequency.value=2.0;
-  const lfoG=audioCtx.createGain(); lfoG.gain.value=0.5;
-  const baseG=audioCtx.createConstantSource(); baseG.offset.value=0.5;
+  const lfo=audio.ctx.createOscillator(); lfo.frequency.value=2.0;
+  const lfoG=audio.ctx.createGain(); lfoG.gain.value=0.5;
+  const baseG=audio.ctx.createConstantSource(); baseG.offset.value=0.5;
   baseG.connect(mix.gain); lfo.connect(lfoG); lfoG.connect(mix.gain); lfo.start(); baseG.start();
-  const arp=audioCtx.createOscillator(); arp.type='square'; arp.frequency.value=440;
-  const arpG=audioCtx.createGain(); arpG.gain.value=0.0;
+  const arp=audio.ctx.createOscillator(); arp.type='square'; arp.frequency.value=440;
+  const arpG=audio.ctx.createGain(); arpG.gain.value=0.0;
   arp.connect(arpG); arpG.connect(mix); arp.start();
   const scale=[220,277,330,440,554,659,880]; let step=0;
   const arpTimer=setInterval(()=>{
-    if(!audioCtx) return;
-    arp.frequency.setTargetAtTime(scale[step%scale.length], audioCtx.currentTime, 0.01);
-    arpG.gain.setTargetAtTime(0.06, audioCtx.currentTime, 0.01);
-    arpG.gain.setTargetAtTime(0.0, audioCtx.currentTime+0.12, 0.05);
+    if(!audio.ctx) return;
+    arp.frequency.setTargetAtTime(scale[step%scale.length], audio.ctx.currentTime, 0.01);
+    arpG.gain.setTargetAtTime(0.06, audio.ctx.currentTime, 0.01);
+    arpG.gain.setTargetAtTime(0.0, audio.ctx.currentTime+0.12, 0.05);
     step++;
   },250);
-  const sweep=audioCtx.createBiquadFilter(); sweep.type='lowpass'; sweep.frequency.value=800;
-  mix.disconnect(); mix.connect(sweep); sweep.connect(analyser);
-  const sweepLfo=audioCtx.createOscillator(); sweepLfo.frequency.value=0.08;
-  const sweepG=audioCtx.createGain(); sweepG.gain.value=900;
+  const sweep=audio.ctx.createBiquadFilter(); sweep.type='lowpass'; sweep.frequency.value=800;
+  mix.disconnect(); mix.connect(sweep); sweep.connect(audio.analyser);
+  const sweepLfo=audio.ctx.createOscillator(); sweepLfo.frequency.value=0.08;
+  const sweepG=audio.ctx.createGain(); sweepG.gain.value=900;
   sweepLfo.connect(sweepG); sweepG.connect(sweep.frequency); sweepLfo.start();
-  mix.gain.setTargetAtTime(0.9, audioCtx.currentTime, 0.5);
+  mix.gain.setTargetAtTime(0.9, audio.ctx.currentTime, 0.5);
   const timerKiller={ stop(){ clearInterval(arpTimer); }, disconnect(){} };
   demoNodes=[...oscs, noise, lfo, baseG, arp, sweepLfo, timerKiller];
   isDemo=true; playing=true; updatePlayBtn();
   curBuffer=null; showSeek(false);   // demo has no finite timeline
-}
-
-function analyze(){
-  if(!analyser) return;
-  analyser.getByteFrequencyData(freq);
-  const n=freq.length;
-  const bassEnd=Math.floor(n*0.06), midEnd=Math.floor(n*0.30);
-  if(!freqPrev || freqPrev.length!==n) freqPrev=new Uint8Array(n);
-  let b=0,m=0,tr=0,sum=0,wsum=0,total=0;
-  let kickF=0, snareF=0, hatF=0;   // spectral flux per band (positive bin deltas)
-  for(let i=0;i<n;i++){
-    const v=freq[i]/255; sum+=v; total+=v; wsum+=v*i;
-    const d=freq[i]-freqPrev[i];
-    if(i<bassEnd){ b+=v; if(d>0) kickF+=d; }
-    else if(i<midEnd){ m+=v; if(d>0) snareF+=d; }
-    else { tr+=v; if(d>0) hatF+=d; }
-  }
-  bands.bass=b/Math.max(1,bassEnd);
-  bands.mid=m/Math.max(1,midEnd-bassEnd);
-  bands.treble=tr/Math.max(1,n-midEnd);
-  bands.level=sum/n;
-  bands.centroid=total>0 ? (wsum/total)/n : 0.5;
-  // first NBINS of spectrum for the ring (log-ish weighting toward audible range)
-  for(let i=0;i<NBINS;i++){ specData[i]=freq[i]; }
-  freqPrev.set(freq);
-
-  // spectral-flux onset detection per band (kick/snare/hat) with adaptive thresholds
-  kickF/=255*Math.max(1,bassEnd); snareF/=255*Math.max(1,midEnd-bassEnd); hatF/=255*Math.max(1,n-midEnd);
-  // auto-gain: normalize bass/mid/treble (and onset flux) against a rolling loudness estimate so quiet and loud tracks react at full range
-  loudEMA = loudEMA*0.99 + bands.level*0.01;
-  const ag = autoGainOn ? Math.max(0.6, Math.min(5, 0.4/(loudEMA+0.03))) : 1;
-  bands.bass=Math.min(1.5, bands.bass*ag); bands.mid=Math.min(1.5, bands.mid*ag); bands.treble=Math.min(1.5, bands.treble*ag); bands.level=Math.min(1.5, bands.level*ag);
-  kickF*=ag; snareF*=ag; hatF*=ag;
-  kickFlux=kickFlux*0.94+kickF*0.06; snareFlux=snareFlux*0.94+snareF*0.06; hatFlux=hatFlux*0.94+hatF*0.06;
-  if(kickF>kickFlux*1.6 && kickF>0.020) beat=1.0;   // kick drives the existing u_beat
-  if(snareF>snareFlux*1.6 && snareF>0.015) snare=1.0;
-  if(hatF>hatFlux*1.7 && hatF>0.010) hat=1.0;
-  beat*=0.90; snare*=0.88; hat*=0.84;
 }
 
 // ---------- RENDER ----------
@@ -360,12 +300,13 @@ function frame(now){
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
   if(dt>0){ const inst=1000/dt; fpsEMA = fpsEMA? fpsEMA*0.9+inst*0.1 : inst; }
   analyze(); resize();
+  if(audio.freq){ for(let i=0;i<NBINS;i++){ specData[i]=audio.freq[i]; } }   // first NBINS of spectrum for the ring (moved out of analyze with freq)
   beatPulse=false;
   // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
-  if(beat>prevBeat+0.5){ beatPulse=true; beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
+  if(audio.beat>prevBeat+0.5){ beatPulse=true; beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
     if(beatTimes.length>=4){ const iv=[]; for(let i=1;i<beatTimes.length;i++) iv.push(beatTimes[i]-beatTimes[i-1]); iv.sort((a,b)=>a-b); const med=iv[Math.floor(iv.length/2)]; if(med>0.3&&med<2.0) bpm=Math.round(60/med); } }
-  prevBeat=beat;
-  if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + bands.level*0.16);
+  prevBeat=audio.beat;
+  if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + audio.bands.level*0.16);
   // auto-mix: arm at the interval, then fire the crossfade on the next beat (downbeat) so transitions feel musical
   if(autoMixOn){
     if(!mixTrans && mixArmedAt===null && time>=autoMixNext) mixArmedAt=time;   // arm: hold for the next beat
@@ -389,18 +330,18 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, specTex);
   gl.uniform1i(U.spec,1);
   gl.uniform2f(U.res,W,H); gl.uniform1f(U.time,time);
-  gl.uniform1f(U.bass,bands.bass); gl.uniform1f(U.mid,bands.mid);
-  gl.uniform1f(U.treble,bands.treble); gl.uniform1f(U.level,bands.level);
-  gl.uniform1f(U.centroid,bands.centroid); gl.uniform1f(U.beat, reducedMotion?beat*0.2:beat);
+  gl.uniform1f(U.bass,audio.bands.bass); gl.uniform1f(U.mid,audio.bands.mid);
+  gl.uniform1f(U.treble,audio.bands.treble); gl.uniform1f(U.level,audio.bands.level);
+  gl.uniform1f(U.centroid,audio.bands.centroid); gl.uniform1f(U.beat, reducedMotion?audio.beat*0.2:audio.beat);
   gl.uniform1f(U.shock, reducedMotion?Math.min(1,(time-shockStart)/0.6)*0.15:Math.min(1,(time-shockStart)/0.6));
-  gl.uniform1f(U.snare, reducedMotion?snare*0.2:snare); gl.uniform1f(U.hat, reducedMotion?hat*0.2:hat);
+  gl.uniform1f(U.snare, reducedMotion?audio.snare*0.2:audio.snare); gl.uniform1f(U.hat, reducedMotion?audio.hat*0.2:audio.hat);
   gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
   gl.uniform1f(U.style,curStyle); gl.uniform1f(U.modeA,modeA); gl.uniform1f(U.modeB,modeB); gl.uniform1f(U.blend,blend);
   gl.uniform1f(U.camYaw, camYaw); gl.uniform1f(U.camPitch, camPitch); gl.uniform1f(U.orbit, orbitActive?1:0); gl.uniform1f(U.zoom, camZoom);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
   // reactivity router: add onset-driven modulation to the look params (clamped to each slider's range)
-  let rSw=0,rGl=0,rFb=0; const rv={kick:beat,snare:snare,hat:hat,bass:bands.bass};
+  let rSw=0,rGl=0,rFb=0; const rv={kick:audio.beat,snare:audio.snare,hat:audio.hat,bass:audio.bands.bass};
   for(const s in router){ const v=rv[s]||0; if(router[s]==='swirl') rSw+=v; else if(router[s]==='glow') rGl+=v; else if(router[s]==='feedback') rFb+=v; }
   gl.uniform1f(U.feedback, Math.max(0,Math.min(0.97,look.feedback+rFb*0.04))); gl.uniform1f(U.swirl, Math.max(0,Math.min(0.02,look.swirl+rSw*0.008))); gl.uniform1f(U.glow, Math.max(0,Math.min(0.3,look.glow+rGl*0.12)));
   gl.uniform1i(U.rmSteps, qual.rmSteps);
@@ -434,8 +375,8 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texB);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
   gl.uniform1i(UC.tex,0); gl.uniform1i(UC.bloom,1); gl.uniform2f(UC.res,W,H);
-  gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion?beat*0.2:beat*1.1));
-  gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion?beat*0.2:beat); gl.uniform1f(UC.time, time);
+  gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion?audio.beat*0.2:audio.beat*1.1));
+  gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion?audio.beat*0.2:audio.beat); gl.uniform1f(UC.time, time);
   gl.drawArrays(gl.TRIANGLES,0,3);
   if(pendingShot){ pendingShot=false;   // capture right after the copy pass so the buffer is valid
     canvas.toBlob(b=>{ if(!b) return; const a=document.createElement('a');
@@ -457,9 +398,9 @@ buildMeters(document.getElementById('mTreble'),14);
 function paintMeter(el,val){ const b=el.children, lit=Math.round(val*14);
   for(let i=0;i<b.length;i++){ b[i].style.height=(i<lit?(3+(i/b.length)*23):2)+'px'; b[i].style.opacity=i<lit?1:0.25; } }
 function updateMeters(){
-  paintMeter(document.getElementById('mBass'),bands.bass);
-  paintMeter(document.getElementById('mMid'),bands.mid);
-  paintMeter(document.getElementById('mTreble'),bands.treble);
+  paintMeter(document.getElementById('mBass'),audio.bands.bass);
+  paintMeter(document.getElementById('mMid'),audio.bands.mid);
+  paintMeter(document.getElementById('mTreble'),audio.bands.treble);
 }
 
 // ---------- CONTROLS ----------
@@ -493,9 +434,9 @@ document.getElementById('urlIn').addEventListener('keydown', e=>{ if(e.key==='En
 const playBtn=document.getElementById('play');
 function updatePlayBtn(){ playBtn.textContent = playing?'⏸ Pause':'▶ Play'; }
 playBtn.addEventListener('click', ()=>{
-  if(!audioCtx){ startDemo(); return; }
-  if(playing){ if(urlAudio) urlAudio.pause(); else audioCtx.suspend(); playing=false; }
-  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audioCtx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
+  if(!audio.ctx){ startDemo(); return; }
+  if(playing){ if(urlAudio) urlAudio.pause(); else audio.ctx.suspend(); playing=false; }
+  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audio.ctx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
   updatePlayBtn();
 });
 // ---------- transport: seek bar (file playback only) ----------
@@ -506,17 +447,17 @@ function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600),
 function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(trackDur); }
 // jump to frac (0..1) of the buffer by recreating the source at that offset
 function seekTo(frac){
-  if(!curBuffer||!audioCtx) return;
+  if(!curBuffer||!audio.ctx) return;
   const off=Math.max(0,Math.min(frac,0.999))*trackDur;
   try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
-  srcNode=audioCtx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || repeatMode===2; srcNode.connect(analyser);
+  srcNode=audio.ctx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || repeatMode===2; srcNode.connect(audio.analyser);
   srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };
-  startCtxTime=audioCtx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
+  startCtxTime=audio.ctx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
   srcNode.start(0, off);
 }
 function updateSeek(){
-  if(!curBuffer||!audioCtx||seeking) return;
-  const el=(audioCtx.currentTime-startCtxTime)%trackDur;
+  if(!curBuffer||!audio.ctx||seeking) return;
+  const el=(audio.ctx.currentTime-startCtxTime)%trackDur;
   seekEl.value=String(Math.round(el/trackDur*1000));
   curTimeEl.textContent=fmtTime(el);
 }
@@ -566,7 +507,7 @@ const savedVol=state.volume;
 if(!isNaN(savedVol)){ volSlider.value=savedVol; volLbl.textContent=Math.round(savedVol*100)+'%'; }
 volSlider.addEventListener('input', e=>{
   const v=parseFloat(e.target.value);
-  if(masterVol) masterVol.gain.setTargetAtTime(v, audioCtx.currentTime, 0.02);
+  if(audio.master) audio.master.gain.setTargetAtTime(v, audio.ctx.currentTime, 0.02);
   volLbl.textContent=Math.round(v*100)+'%';
   localStorage.setItem('resomance_vol', String(v));
 });
@@ -622,15 +563,15 @@ beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
 beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
 // auto-gain toggle: normalize band levels against rolling loudness (default on; ~1x for normal-level tracks)
 const agcChk=document.getElementById('agc');
-agcChk.checked=autoGainOn;
-agcChk.addEventListener('change', e=>{ autoGainOn=e.target.checked; localStorage.setItem('resomance_autogain', autoGainOn?'1':'0'); });
+agcChk.checked=state.autoGainOn;
+agcChk.addEventListener('change', e=>{ state.autoGainOn=e.target.checked; localStorage.setItem('resomance_autogain', state.autoGainOn?'1':'0'); });
 // keyboard
 // ---------- named look presets (snapshot slots), recalled with Shift+1..8 ----------
 let presets = state.presets;
 while(presets.length<8) presets.push(null);
 function syncLookSliders(){ for(const k of ['feedback','swirl','glow','vig','ca','grain']){ const el=document.getElementById('lk'+k.charAt(0).toUpperCase()+k.slice(1)); if(el) el.value=look[k]; } }
 function syncRouterUI(){ for(const [id,src] of [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']]){ const s=document.getElementById(id); if(s) s.value=router[src]; } }
-function captureLook(){ return { mode:curMode, style:scenePalette[curMode], look:{...look}, router:{...router}, customPal:JSON.parse(JSON.stringify(customPal)), ring:ringOn, autoHide, autoMix:autoMixOn, beatShift:beatShiftOn, autoGain:autoGainOn }; }
+function captureLook(){ return { mode:curMode, style:scenePalette[curMode], look:{...look}, router:{...router}, customPal:JSON.parse(JSON.stringify(customPal)), ring:ringOn, autoHide, autoMix:autoMixOn, beatShift:beatShiftOn, autoGain:state.autoGainOn }; }
 function applyLook(p){
   scenePalette[p.mode]=p.style; setMode(p.mode); localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette));
   Object.assign(look, p.look); localStorage.setItem('resomance_look', JSON.stringify(look)); syncLookSliders();
