@@ -176,6 +176,7 @@
           <button data-mode="2">Plasma</button>
           <button data-mode="3">Vortex</button>
           <button data-mode="4">Terrain</button>
+          <button data-mode="5">User</button>
         </div>
         <label class="chk"><input type="checkbox" id="autoMix" /> auto-mix</label>
       </div>
@@ -221,6 +222,7 @@
       </div>
       <div class="row" style="margin-top:9px;">
         <button id="lookToggle">◐ look</button>
+        <button id="shaderToggle">⊘ shader</button>
       </div>
       <div id="lookPanel" style="display:none; flex-direction:column; gap:7px;">
         <label class="chk">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
@@ -249,19 +251,24 @@
           <button class="ps" data-s="8">8</button>
         </div>
       </div>
+      <div id="shaderPanel" style="display:none; flex-direction:column; gap:6px;">
+        <div class="label">paste a vec3 scene body — uv, u_bass, u_mid, u_treble, u_beat, u_snare, u_hat, palette(), fbm(), u_time</div>
+        <textarea id="shaderCode" rows="5" style="width:100%;background:rgba(10,12,22,.8);color:#dfe6ff;border:1px solid rgba(150,180,255,.3);border-radius:8px;padding:8px;font:inherit;font-size:11px;resize:vertical;pointer-events:auto;"></textarea>
+        <div class="row"><button id="shaderCompile">compile</button><span id="shaderMsg" class="label"></span></div>
+      </div>
     </div>
   </div>
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · <b>drag</b> orbit · drop audio/folder anywhere · <b>1-5</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
+<div id="hint">press <b>H</b> hide UI · <b>drag</b> orbit · drop audio/folder anywhere · <b>1-6</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
 <div id="toast"></div>
 <div id="help"><div class="box">
   <h2>R E S O M A N C E — shortcuts</h2>
   <table>
     <tr><td class="k"><b>Space</b></td><td>play / pause</td></tr>
     <tr><td class="k"><b>H</b></td><td>toggle HUD</td></tr>
-    <tr><td class="k"><b>1</b>–<b>5</b></td><td>scene: Fractal / Tunnel / Plasma / Vortex / Terrain</td></tr>
+    <tr><td class="k"><b>1</b>–<b>6</b></td><td>scene: Fractal / Tunnel / Plasma / Vortex / Terrain / User</td></tr>
     <tr><td class="k"><b>←</b>/<b>→</b></td><td>previous / next track</td></tr>
     <tr><td class="k"><b>R</b></td><td>spectrum ring</td></tr>
     <tr><td class="k"><b>F</b></td><td>fullscreen</td></tr>
@@ -539,12 +546,20 @@ vec3 sceneTerrain(vec2 uv){
   return col;
 }
 
+// ---------- scene 5: user-pasted shader (body replaced at runtime; compile errors reported in the UI) ----------
+vec3 sceneUser(vec2 uv){
+  // USER_SHADER_BEGIN
+  return palette(u_time*0.1 + u_bass) * (0.3 + u_bass);   // default body — paste your own GLSL (uv, u_bass, u_mid, u_treble, u_beat, u_snare, u_hat, palette(), fbm(), u_time)
+  // USER_SHADER_END
+}
+
 vec3 sceneById(float id, vec2 uv){
   if(id < 0.5)      return sceneFractal(uv);
   else if(id < 1.5) return sceneTunnel(uv);
   else if(id < 2.5) return scenePlasma(uv);
   else if(id < 3.5) return sceneVortex(uv);
-  else              return sceneTerrain(uv);
+  else if(id < 4.5) return sceneTerrain(uv);
+  else              return sceneUser(uv);
 }
 
 void main(){
@@ -733,21 +748,24 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 let specData = new Uint8Array(NBINS);
 
 function uni(p,n){ return gl.getUniformLocation(p,n); }
-const U = {
-  res:uni(progScene,'u_res'), time:uni(progScene,'u_time'),
-  bass:uni(progScene,'u_bass'), mid:uni(progScene,'u_mid'),
-  treble:uni(progScene,'u_treble'), level:uni(progScene,'u_level'),
-  centroid:uni(progScene,'u_centroid'), beat:uni(progScene,'u_beat'), shock:uni(progScene,'u_shock'),
-  snare:uni(progScene,'u_snare'), hat:uni(progScene,'u_hat'),
-  style:uni(progScene,'u_style'), modeA:uni(progScene,'u_modeA'), modeB:uni(progScene,'u_modeB'), blend:uni(progScene,'u_blend'),
-  camYaw:uni(progScene,'u_camYaw'), camPitch:uni(progScene,'u_camPitch'), orbit:uni(progScene,'u_orbit'), zoom:uni(progScene,'u_zoom'),
-  specOn:uni(progScene,'u_specOn'), prev:uni(progScene,'u_prev'), spec:uni(progScene,'u_spec'),
-  reducedMotion:uni(progScene,'u_reducedMotion'),
-  feedback:uni(progScene,'u_feedback'), swirl:uni(progScene,'u_swirl'), glow:uni(progScene,'u_glow'),
-  rmSteps:uni(progScene,'u_rmSteps'),
-  pa:uni(progScene,'u_pa'), pb:uni(progScene,'u_pb'), pc:uni(progScene,'u_pc'), pd:uni(progScene,'u_pd'),
-  paletteShift:uni(progScene,'u_paletteShift'),
-};
+function buildSceneU(p){
+  return {
+    res:uni(p,'u_res'), time:uni(p,'u_time'),
+    bass:uni(p,'u_bass'), mid:uni(p,'u_mid'),
+    treble:uni(p,'u_treble'), level:uni(p,'u_level'),
+    centroid:uni(p,'u_centroid'), beat:uni(p,'u_beat'), shock:uni(p,'u_shock'),
+    snare:uni(p,'u_snare'), hat:uni(p,'u_hat'),
+    style:uni(p,'u_style'), modeA:uni(p,'u_modeA'), modeB:uni(p,'u_modeB'), blend:uni(p,'u_blend'),
+    camYaw:uni(p,'u_camYaw'), camPitch:uni(p,'u_camPitch'), orbit:uni(p,'u_orbit'), zoom:uni(p,'u_zoom'),
+    specOn:uni(p,'u_specOn'), prev:uni(p,'u_prev'), spec:uni(p,'u_spec'),
+    reducedMotion:uni(p,'u_reducedMotion'),
+    feedback:uni(p,'u_feedback'), swirl:uni(p,'u_swirl'), glow:uni(p,'u_glow'),
+    rmSteps:uni(p,'u_rmSteps'),
+    pa:uni(p,'u_pa'), pb:uni(p,'u_pb'), pc:uni(p,'u_pc'), pd:uni(p,'u_pd'),
+    paletteShift:uni(p,'u_paletteShift'),
+  };
+}
+let U = buildSceneU(progScene);   // rebuilt (buildSceneU) whenever the scene program is recompiled for a user shader
 const UC = { tex:uni(progCopy,'u_tex'), bloom:uni(progCopy,'u_bloom'), res:uni(progCopy,'u_res'), bloomAmt:uni(progCopy,'u_bloomAmt'), vig:uni(progCopy,'u_vig'), ca:uni(progCopy,'u_ca'), grain:uni(progCopy,'u_grain'), beat:uni(progCopy,'u_beat'), time:uni(progCopy,'u_time') };
 const UB = { tex:uni(progBright,'u_tex'), res:uni(progBright,'u_res'), thresh:uni(progBright,'u_thresh') };
 const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(progBlur,'u_dir') };
@@ -1025,11 +1043,11 @@ function h2v(h){ return (h.replace('#','').match(/.{2}/g)||[]).map(x=>parseInt(x
 function syncColorInputs(){ const map={cpA:'a',cpB:'b',cpC:'c',cpD:'d'}; for(const id in map){ const el=document.getElementById(id); if(el) el.value=v2h(customPal[map[id]]); } }
 function syncPalEditor(){ const w=document.getElementById('palEdit'); if(!w) return; w.style.display = curStyle===4?'flex':'none'; if(curStyle===4) syncColorInputs(); }
 // persisted look settings (volume is persisted separately in its own handler)
-let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=4)?m:0; })();
+let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=5)?m:0; })();
 // per-scene palette memory: each scene remembers its own palette index (0..4)
 let scenePalette; (()=>{ try{ const a=JSON.parse(localStorage.getItem('resomance_scene_palette')||'null'); if(Array.isArray(a)) scenePalette=a.map(Number); }catch(e){}
   if(!scenePalette||!scenePalette.length){ const lg=parseFloat(localStorage.getItem('resomance_palette')); const v=(lg>=0&&lg<=4)?lg:0; scenePalette=[v,v,v,v]; }   // seed from the legacy global palette
-  while(scenePalette.length<5) scenePalette.push(0);
+  while(scenePalette.length<6) scenePalette.push(0);
   localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette)); })();
 let curStyle = scenePalette[curMode]||0;
 let ringOn = localStorage.getItem('resomance_ring') !== '0';
@@ -1058,7 +1076,7 @@ function frame(now){
     if(!mixTrans && mixArmedAt===null && time>=autoMixNext) mixArmedAt=time;   // arm: hold for the next beat
     if(!mixTrans && mixArmedAt!==null){
       const armWait = (bpm>=40&&bpm<=200) ? Math.min(3.0, 2.2*60/bpm) : 3.0;   // fire on a beat, or fall back after ~2 beats (3s if no BPM)
-      if(beatPulse || time-mixArmedAt>=armWait){ const to=(curMode+1)%5; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; mixArmedAt=null; } }
+      if(beatPulse || time-mixArmedAt>=armWait){ const to=(curMode+1)%6; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; mixArmedAt=null; } }
     if(mixTrans){ const k=Math.max(0,Math.min(1,(time-mixTrans.start)/AUTO_MIX_DUR)); blend=k;
       if(!mixTrans.palDone && k>=0.5){ mixTrans.palDone=true; applyScenePalette(mixTrans.to); }   // swap to the destination scene's palette at the crossfade midpoint
       if(k>=1){ curMode=mixTrans.to; modeA=modeB=curMode; blend=0; mixTrans=null; autoMixNext=time+AUTO_MIX_INTERVAL; applyModeUI(); } }
@@ -1260,6 +1278,26 @@ lookToggle.addEventListener('click', ()=> lookPanel.style.display = lookPanel.st
 function bindLook(id,key){ const el=document.getElementById(id); el.value=look[key];
   el.addEventListener('input', e=>{ look[key]=parseFloat(e.target.value); localStorage.setItem('resomance_look', JSON.stringify(look)); }); }
 bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow','glow'); bindLook('lkVig','vig'); bindLook('lkCa','ca'); bindLook('lkGrain','grain');
+// user shader: paste a vec3 scene body, compiled into the scene program at runtime (compile errors reported)
+const shaderToggle=document.getElementById('shaderToggle'), shaderPanel=document.getElementById('shaderPanel');
+shaderToggle.addEventListener('click', ()=> shaderPanel.style.display = shaderPanel.style.display==='none'?'flex':'none');
+const shaderCode=document.getElementById('shaderCode'), shaderCompile=document.getElementById('shaderCompile'), shaderMsg=document.getElementById('shaderMsg');
+function compileUserShader(){
+  const code=shaderCode.value;
+  const src=document.getElementById('fsScene').textContent.replace(/\/\/ USER_SHADER_BEGIN[\s\S]*?\/\/ USER_SHADER_END/, '// USER_SHADER_BEGIN\n'+code+'\n  // USER_SHADER_END');
+  try{
+    const p=program(vsSrc, src);
+    gl.deleteProgram(progScene); progScene=p; U=buildSceneU(p);
+    localStorage.setItem('resomance_usershader', code);
+    shaderMsg.textContent='compiled ✓'; shaderMsg.style.color='#7fd0a0'; shaderCode.title='';
+  }catch(e){
+    shaderMsg.textContent='compile error (see tooltip/console)'; shaderMsg.style.color='#ff7a8a';
+    shaderCode.title=e.message; console.error('user shader error:\n'+e.message);
+  }
+}
+shaderCompile.addEventListener('click', compileUserShader);
+shaderCode.value = localStorage.getItem('resomance_usershader') || 'return palette(u_time*0.1 + u_bass + length(uv)*0.3) * (0.3 + u_bass);';
+if(localStorage.getItem('resomance_usershader')) compileUserShader();   // recompile the saved shader on load
 // reactivity router: source -> target selects (kick/snare/hat/bass -> none/swirl/glow/feedback), persisted
 const RT_OPTS=['none','swirl','glow','feedback'];
 [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']].forEach(([id,src])=>{
@@ -1325,7 +1363,7 @@ window.addEventListener('keydown', e=>{
     return;
   }
   if(e.shiftKey && e.code.startsWith('Digit')){ const n=parseInt(e.code.slice(5),10); if(n>=1&&n<=8){ e.preventDefault(); if(e.ctrlKey||e.metaKey) savePreset(n-1); else recallPreset(n-1); return; } }
-  if(e.key>='1'&&e.key<='5') setMode(parseInt(e.key,10)-1);
+  if(e.key>='1'&&e.key<='6') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
   if(e.key==='f'||e.key==='F') toggleFullscreen();

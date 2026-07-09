@@ -22,7 +22,7 @@ UX/perf/integration. Effort is rough.
 - [x] **Beat-synced auto-mix** — The scene crossfade currently fires on a fixed timer; snap it to bar/beat boundaries derived from the existing BPM estimate so transitions land on the downbeat and feel musical. (effort: medium)
 
 ## Scenes & look
-- [ ] **Custom user-shader scene** — Add a 5th scene powered by user-pasted GLSL that receives the same audio uniforms (`u_bass`, `u_mid`, `u_treble`, `u_beat`, `u_snare`, `u_hat`, `palette()`), with compile-error reporting, so anyone can drop in their own fragment shader. (effort: large)
+- [x] **Custom user-shader scene** — Add a 5th scene powered by user-pasted GLSL that receives the same audio uniforms (`u_bass`, `u_mid`, `u_treble`, `u_beat`, `u_snare`, `u_hat`, `palette()`), with compile-error reporting, so anyone can drop in their own fragment shader. (effort: large)
 - [x] **Additional raymarched scene** — Add a new scene such as an audio-reactive particle galaxy or a scrolling frequency-bar terrain to expand the four current fields (Fractal/Tunnel/Plasma/Vortex) and give auto-mix more variety. (effort: large)
 - [x] **Post-FX toggles (vignette / chromatic aberration / film grain)** — Extend the copy/tonemap pass with optional, beat-reactive vignette, chromatic aberration, and film-grain controls in the existing "look" panel for a graded, cinematic finish. (effort: medium)
 - [x] **Per-scene palette memory** — Remember a separate palette choice per scene so switching scenes keeps each one's intended mood, rather than one global palette across all four. (effort: small)
