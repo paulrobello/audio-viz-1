@@ -10,6 +10,7 @@ import { state, emit } from './state.js';
 
 let srcNode = null, demoNodes = null, playing = true, isDemo = false;
 let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
+let micStream = null, micSrc = null;   // getUserMedia stream + MediaStreamSource for live mic / line-in (not monitored to speakers — avoids feedback)
 let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek state
 let abA = -1, abB = -1;   // A-B loop points in seconds (-1 = unset); armed when both >= 0 and abB > abA
 let curTrackName = '';    // current track name (per-track cue-map key)
@@ -69,7 +70,26 @@ export function stopSources(){
   if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
   if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
   if(urlAudio){ try{urlAudio.pause();}catch(e){} try{urlMes.disconnect();}catch(e){} urlAudio=null; urlMes=null; }
+  if(micSrc){ try{micSrc.disconnect();}catch(e){} micSrc=null; }                                       // live-input cleanup
+  if(micStream){ micStream.getTracks().forEach((t)=>t.stop()); micStream=null;                         // stop the mic tracks
+    if(audio.analyser && audio.master){ try{audio.analyser.connect(audio.master);}catch(e){} } }       // restore the speaker monitor path (muted during mic mode)
   isDemo=false;
+}
+// ---------- live mic / line-in source (getUserMedia → analyser; NOT monitored to speakers to avoid feedback) ----------
+export function startMic(){
+  ensureCtx(); stopSources();
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('mic not supported here'); return; }
+  navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false } })
+    .then((stream)=>{
+      stopSources();                                                                                   // clear any source that arrived while the prompt was open
+      micStream = stream;
+      micSrc = audio.ctx.createMediaStreamSource(stream);
+      micSrc.connect(audio.analyser);
+      try{ audio.analyser.disconnect(audio.master); }catch(e){}                                        // mute the monitor path so the mic doesn't howl out the speakers
+      curBuffer=null; playlist=[]; curIdx=-1; trackDur=0;
+      playing=true; isDemo=false; playState(); setTrackName('🎤 live input'); seekVis(false); trackCount();
+    })
+    .catch(()=>toast('mic blocked or unavailable'));
 }
 
 function playFile(file, offset){
@@ -201,7 +221,7 @@ export function seekTo(frac){
 export function togglePlay(){
   if(!audio.ctx){ startDemo(); return; }
   if(playing){ if(urlAudio) urlAudio.pause(); else audio.ctx.suspend(); playing=false; }
-  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audio.ctx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
+  else { if(urlAudio) urlAudio.play(); else if(micSrc) audio.ctx.resume(); else if(!srcNode && playlist.length) playIndex(curIdx); else audio.ctx.resume(); playing=true; }   // URL: toggle the element; mic: resume the ctx; else restart the track if playback stopped at queue end (repeat off)
   playState();
 }
 

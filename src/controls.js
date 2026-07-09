@@ -115,6 +115,7 @@ export function initControls() {
   const fileIn = /** @type {HTMLInputElement} */ (document.getElementById('file'));
   fileIn.addEventListener('change', () => { if (fileIn.files && fileIn.files.length) pb.loadFiles(fileIn.files); });
   document.getElementById('demo').addEventListener('click', pb.startDemo);
+  document.getElementById('mic').addEventListener('click', pb.startMic);
   const urlIn = /** @type {HTMLInputElement} */ (document.getElementById('urlIn'));
   document.getElementById('urlLoad').addEventListener('click', () => { const u = urlIn.value.trim(); if (u) pb.playUrl(u); });
   urlIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('urlLoad').click(); } });
