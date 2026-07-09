@@ -9,6 +9,7 @@ import { audio, analyze } from './audio.js';
 import * as pb from './playback.js';
 import { resize, setQuality } from './gl.js';
 import { initRender, renderFrame, requestScreenshot, compileUserShader } from './render.js';
+import { cam, initCamera } from './camera.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
@@ -18,6 +19,8 @@ window.addEventListener('resize', resize);   // gl.js performs the initial resiz
 
 // build the uniform-location caches (U/UC/UB/UBL) + recompile any saved user shader
 initRender();
+// wire orbit/pinch-zoom camera gestures onto the canvas (mutates cam.* in place)
+initCamera(canvas);
 
 // ---------- transport bus: playback.js → view (UI updates that used to be inline) ----------
 on('transport', (e) => {
@@ -64,8 +67,6 @@ let modeA=curMode, modeB=curMode, blend=0;
 let autoMixOn = state.autoMixOn;
 let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null, mixArmedAt=null;
 function clockSec(){ return (performance.now()-t0)/1000; }
-// orbit camera (drag) state for the raymarch scenes
-let camYaw=0, camPitch=0, camZoom=1, orbitActive=false, dragging=false, lastDX=0, lastDY=0; const pointers=new Map(); let pinchDist0=0;
 function frame(now){
   const time=(now-t0)/1000;
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
@@ -89,7 +90,7 @@ function frame(now){
   }
 
   // render: spectrum upload + scene + bloom + composite + (optional) screenshot + ping-pong swap
-  renderFrame({ time, modeA, modeB, blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw, camPitch, camZoom, orbitActive });
+  renderFrame({ time, modeA, modeB, blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active });
 
   if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); if(showFps) fpsVal.textContent=Math.round(fpsEMA)+' fps'; if(beatShiftOn&&bpm) bpmVal.textContent=bpm+' bpm'; }
   requestAnimationFrame(frame);
@@ -303,24 +304,6 @@ window.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('
   }
   if(dt.files && dt.files.length) pb.loadFiles(dt.files);
 });
-// orbit camera: drag on the canvas to look around the Fractal/Tunnel field (double-click resets to auto)
-// multi-pointer camera: one finger orbits, two fingers orbit + pinch-zoom
-function updateGesture(isMove){
-  const ps=[...pointers.values()];
-  if(ps.length<1){ dragging=false; pinchDist0=0; return; }
-  orbitActive=true; dragging=true;
-  if(ps.length>=2){ const a=ps[0],b=ps[1]; const dist=Math.hypot(b.x-a.x,b.y-a.y); const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-    if(isMove && pinchDist0>0) camZoom=Math.max(0.4,Math.min(3.5, camZoom*(dist/pinchDist0)));
-    if(isMove){ camYaw-=(mx-lastDX)*0.006; camPitch=Math.max(-1.2,Math.min(1.2, camPitch-(my-lastDY)*0.006)); }
-    pinchDist0=dist; lastDX=mx; lastDY=my; }
-  else { const p=ps[0]; if(isMove){ camYaw-=(p.x-lastDX)*0.008; camPitch=Math.max(-1.2,Math.min(1.2, camPitch-(p.y-lastDY)*0.008)); } lastDX=p.x; lastDY=p.y; pinchDist0=0; }
-}
-canvas.addEventListener('pointerdown', e=>{ if(e.button!==0 && e.pointerType==='mouse') return; pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); try{canvas.setPointerCapture(e.pointerId);}catch(_){} updateGesture(false); });
-canvas.addEventListener('pointermove', e=>{ if(!pointers.has(e.pointerId)) return; pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); updateGesture(true); });
-const endDrag=e=>{ pointers.delete(e.pointerId); try{canvas.releasePointerCapture(e.pointerId);}catch(_){} updateGesture(false); };
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
-canvas.addEventListener('dblclick', ()=>{ orbitActive=false; camYaw=camPitch=0; camZoom=1; toast('auto camera'); });
 
 // auto-start demo after first gesture (browsers require a user gesture for audio)
 function firstGesture(){
