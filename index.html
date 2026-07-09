@@ -147,6 +147,10 @@
         <button id="rep" class="tog" title="repeat (off / all / one)">↻</button>
         <span id="trackCount" class="label" style="margin-left:4px;"></span>
       </div>
+      <div class="row" style="margin-bottom:9px;">
+        <input type="text" id="urlIn" placeholder="paste audio URL or stream" style="flex:1;min-width:140px;background:rgba(20,26,48,.8);color:#dfe6ff;border:1px solid rgba(150,180,255,.3);border-radius:8px;padding:7px 9px;font:inherit;font-size:12px;">
+        <button id="urlLoad">▶ URL</button>
+      </div>
       <div class="row" id="seekRow" style="margin-bottom:9px; display:none;">
         <span id="curTime" class="label" style="width:42px;text-align:right;">0:00</span>
         <input type="range" id="seek" min="0" max="1000" step="1" value="0" style="width:210px;" />
@@ -709,6 +713,7 @@ const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(prog
 // ---------- AUDIO ----------
 let audioCtx=null, analyser=null, freq=null, masterVol=null;
 let srcNode=null, demoNodes=null, playing=true, isDemo=false;
+let urlAudio=null, urlMes=null;   // <audio> + MediaElementSource for URL / live-stream playback
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
 let repeatMode = (()=>{ const r=parseInt(localStorage.getItem('resomance_repeat'),10); return (r>=0&&r<=2)?r:1; })();   // 0=off, 1=all (default preserves the looping queue), 2=one
@@ -798,6 +803,7 @@ function ensureCtx(){
 function stopSources(){
   if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
   if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
+  if(urlAudio){ try{urlAudio.pause();}catch(e){} try{urlMes.disconnect();}catch(e){} urlAudio=null; urlMes=null; }
   isDemo=false;
 }
 
@@ -827,6 +833,19 @@ function playFile(file, offset){
     });
   };
   reader.readAsArrayBuffer(file);
+}
+// ---------- URL / stream source (<audio> + MediaElementSource into the analyser) ----------
+function playUrl(url){
+  ensureCtx(); stopSources();
+  try{
+    const audio=new Audio();
+    audio.crossOrigin='anonymous';   // required so the analyser can read the stream (CORS-enabled sources only)
+    audio.src=url; audio.loop=true;   // loop finite URLs; live streams ignore loop
+    urlMes=audioCtx.createMediaElementSource(audio); urlMes.connect(analyser);
+    urlAudio=audio; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
+    audio.play().then(()=>{ playing=true; isDemo=false; updatePlayBtn(); setTrackName(url.length>52?url.slice(0,52)+'…':url); showSeek(false); updateTrackCounter(); })
+      .catch(()=>{ toast('could not play URL'); stopSources(); });
+  }catch(e){ toast('could not play URL'); }
 }
 // ---------- playlist queue (multi-file / folder) ----------
 function isAudio(f){ return f && (f.type.startsWith('audio') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba|aif[f]?)$/i.test(f.name)); }
@@ -1111,12 +1130,14 @@ function poke(){ showUI(); clearTimeout(idleTimer); if(autoHide) idleTimer=setTi
 poke();
 document.getElementById('file').addEventListener('change', e=>{ if(e.target.files.length) loadFiles(e.target.files); });
 document.getElementById('demo').addEventListener('click', startDemo);
+document.getElementById('urlLoad').addEventListener('click', ()=>{ const u=document.getElementById('urlIn').value.trim(); if(u) playUrl(u); });
+document.getElementById('urlIn').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('urlLoad').click(); } });
 const playBtn=document.getElementById('play');
 function updatePlayBtn(){ playBtn.textContent = playing?'⏸ Pause':'▶ Play'; }
 playBtn.addEventListener('click', ()=>{
   if(!audioCtx){ startDemo(); return; }
-  if(playing){ audioCtx.suspend(); playing=false; }
-  else { if(!srcNode && playlist.length) playIndex(curIdx); else audioCtx.resume(); playing=true; }   // restart the track if playback stopped at queue end (repeat off)
+  if(playing){ if(urlAudio) urlAudio.pause(); else audioCtx.suspend(); playing=false; }
+  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audioCtx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
   updatePlayBtn();
 });
 // ---------- transport: seek bar (file playback only) ----------
