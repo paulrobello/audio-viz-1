@@ -14,6 +14,7 @@ import * as pb from './playback.js';
 import { toggleHelp, toggleFullscreen, toggleHideKey, isHelpOpen, isSeekFocused, poke } from './ui.js';
 import { compileUserShader, requestScreenshot } from './render.js';
 import { setQuality } from './gl.js';
+import { toggleRecording } from './capture.js';
 
 // auto-mix interval clock — shares state.bootT0 (set in state.js, which loads first) so the
 // interval timer is provably on the same epoch as main.js's frame clock, not just empirically.
@@ -253,6 +254,13 @@ export function initControls() {
 
   // preset slot buttons (save when psSave checked, else recall)
   document.querySelectorAll('.ps').forEach((b) => b.addEventListener('click', () => { const btn = /** @type {HTMLElement} */ (b); const i = +btn.dataset.s - 1; if (psSave.checked) savePreset(i); else recallPreset(i); }));
+
+  // video recording (canvas + audio → MediaRecorder → .webm); button reflects recording state
+  const recBtn = document.getElementById('recToggle');
+  if (recBtn) {
+    recBtn.addEventListener('click', () => toggleRecording());
+    on('transport', (e) => { if (e.type === 'recState') { recBtn.classList.toggle('rec', !!e.on); recBtn.textContent = e.on ? '■ Stop rec' : '⏺ Rec'; } });
+  }
 
   // keyboard: player keys -> pb, display keys -> ui, scene/look keys -> local
   window.addEventListener('keydown', (e) => {

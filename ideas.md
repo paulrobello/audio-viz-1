@@ -43,7 +43,7 @@ rough.
 - [x] **Live microphone / line-in input** — Add `getUserMedia` as a fourth source feeding the analyser, so the viz reacts to a mic, instrument, or loopback system-audio capture in real time — turning RESOMANCE into a live-performance rig, not just a file player. (effort: medium)
 
 ### Capture & output
-- [ ] **Video recording with audio (WebM export)** — Wire `canvas.captureStream()` plus a `MediaStreamAudioDestinationNode` track into a `MediaRecorder` so users can record a clip of the visualization *with sound* and download a `.webm`, complementing the existing still `S` screenshot. (effort: large)
+- [x] **Video recording with audio (WebM export)** — Wire `canvas.captureStream()` plus a `MediaStreamAudioDestinationNode` track into a `MediaRecorder` so users can record a clip of the visualization *with sound* and download a `.webm`, complementing the existing still `S` screenshot. (effort: large)
 - [ ] **Second-window / projection output** — Open a clean, fullscreen, UI-free copy of the canvas in a separate window (synced over `BroadcastChannel`) so a VJ can control the look from the main window while projecting the pristine viz to a second monitor or projector. (effort: large)
 
 ### Audio analysis & reactivity
