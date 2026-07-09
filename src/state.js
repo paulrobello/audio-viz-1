@@ -63,6 +63,7 @@ export const state = {
   beatShiftOn: localStorage.getItem('resomance_beatshift') === '1',
   autoGainOn: localStorage.getItem('resomance_autogain') !== '0',
   artPaletteOn: localStorage.getItem('resomance_artpal') === '1',   // derive a Custom palette from loaded cover art
+  crossfadeOn: localStorage.getItem('resomance_xfade') === '1',     // overlap+fade track changes for seamless transitions
   // per-track look bindings: { trackKey: snapshot } so loading a bound track auto-recalls its visual
   trackBindings: (() => { try { const o = JSON.parse(localStorage.getItem('resomance_track_bindings') ?? '{}'); return o && typeof o === 'object' ? o : {}; } catch (_) { return {}; } })(),
   showFps: localStorage.getItem('resomance_fps') === '1',

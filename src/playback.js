@@ -10,6 +10,9 @@ import { state, emit } from './state.js';
 import { parseId3 } from './id3.js';
 
 let srcNode = null, demoNodes = null, playing = true, isDemo = false;
+let srcGain = null;     // per-source gain for the active buffer source (enables track crossfades)
+let xfadeOut = null;    // { src, gain } of the outgoing source while a track crossfade is in progress
+const XFADE = 4.0;      // crossfade duration in seconds
 let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
 let micStream = null, micSrc = null;   // getUserMedia stream + MediaStreamSource for live mic / line-in (not monitored to speakers — avoids feedback)
 let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek state
@@ -81,13 +84,24 @@ export function currentTrackKey(){ return curSourceKey; }   // identity for per-
 })();
 
 export function stopSources(){
+  stopXfadeOut();
   if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
+  if(srcGain){ try{srcGain.disconnect();}catch(e){} srcGain=null; }
   if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
   if(urlAudio){ try{urlAudio.pause();}catch(e){} try{urlMes.disconnect();}catch(e){} urlAudio=null; urlMes=null; }
   if(micSrc){ try{micSrc.disconnect();}catch(e){} micSrc=null; }                                       // live-input cleanup
   if(micStream){ micStream.getTracks().forEach((t)=>t.stop()); micStream=null;                         // stop the mic tracks
     if(audio.analyser && audio.master){ try{audio.analyser.connect(audio.master);}catch(e){} } }       // restore the speaker monitor path (muted during mic mode)
   isDemo=false;
+}
+// hard-stop the outgoing crossfade source (used by stopSources / seekTo / a superseding load)
+function stopXfadeOut(){
+  if(!xfadeOut) return;
+  const o=xfadeOut; xfadeOut=null;
+  if(!audio.ctx) return;
+  o.src.onended=null;
+  try{ o.gain.gain.cancelScheduledValues(audio.ctx.currentTime); }catch(e){}
+  try{ o.src.stop(); }catch(e){} try{ o.src.disconnect(); }catch(e){} try{ o.gain.disconnect(); }catch(e){}
 }
 // ---------- live mic / line-in source (getUserMedia → analyser; NOT monitored to speakers to avoid feedback) ----------
 export function startMic(){
@@ -106,8 +120,13 @@ export function startMic(){
     .catch(()=>toast('mic blocked or unavailable'));
 }
 
-function playFile(file, offset){
-  ensureCtx(); stopSources();
+function playFile(file, offset, xfade){
+  ensureCtx();
+  const xfd = xfade ? Math.min(XFADE, Math.max(0.3, xfade)) : 0;   // crossfade seconds (0 = hard cut)
+  const canXfade = xfd > 0 && state.crossfadeOn && srcNode && playing;
+  const outgoing = canXfade ? { src: srcNode, gain: srcGain } : null;
+  if (canXfade) { stopXfadeOut(); xfadeOut = outgoing; srcNode = null; srcGain = null; }   // hand the active source to the outgoing pair; mark crossfade in progress
+  else stopSources();
   const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
   const reader = new FileReader();
   reader.onload = () => {
@@ -120,9 +139,20 @@ function playFile(file, offset){
       startCtxTime=audio.ctx.currentTime-off;
       srcNode = audio.ctx.createBufferSource();
       srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || state.repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
-      srcNode.connect(audio.analyser);
+      srcGain = audio.ctx.createGain();
+      const t = audio.ctx.currentTime;
+      srcGain.gain.setValueAtTime(canXfade ? 0 : 1, t);   // fade in from silence during a crossfade, else full
+      srcNode.connect(srcGain); srcGain.connect(audio.analyser);
       srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
       srcNode.start(0, off); playing=true; isDemo=false; playState();
+      if (canXfade) {   // overlap the outgoing + incoming over the crossfade window
+        srcGain.gain.linearRampToValueAtTime(1, t + xfd);
+        if (outgoing) {
+          outgoing.gain.gain.cancelScheduledValues(t); outgoing.gain.gain.setValueAtTime(outgoing.gain.gain.value, t); outgoing.gain.gain.linearRampToValueAtTime(0, t + xfd);
+          outgoing.src.onended = null; try { outgoing.src.stop(t + xfd + 0.1); } catch (e) {}   // stop the outgoing just after the fade completes
+        }
+        setTimeout(() => { if (xfadeOut === outgoing) xfadeOut = null; }, (xfd + 0.4) * 1000);   // release the in-progress flag once the fade is done
+      }
       setTrackName(file.name);
       seekVis(true);
       loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' }); emit('transport', { type:'wave' });   // reload this track's cues + reset A-B + repaint the waveform
@@ -131,6 +161,7 @@ function playFile(file, offset){
       curSourceKey = file.name; emit('transport', { type:'trackLoaded', key: curSourceKey });   // per-track look binding recall
     }).catch(e=>{
       if(tok!==loadToken) return;
+      if (canXfade) stopSources();   // a crossfade that failed to decode: hard-stop everything rather than leave the outgoing orphaned
       toast('could not read '+file.name);
       if(playlist.length>1 && ++decodeFails<playlist.length) nextTrack();   // skip a bad file within a queue (bounded)
       else fatal('Could not decode audio: '+e.message);
@@ -166,9 +197,26 @@ export function playIndex(i, offset){
   playFile(playlist[curIdx], offset||0); trackCount();
   saveQueuePos(offset||0);   // checkpoint the new track + its resume offset
 }
+// playIndex variant that overlaps the incoming over a crossfade (DJ-style transition)
+function playIndexXfade(i, dur){
+  if(!playlist.length) return;
+  curIdx=(i+playlist.length)%playlist.length;
+  playFile(playlist[curIdx], 0, dur); trackCount(); saveQueuePos(0);
+}
 function randIdx(){ let r; do{ r=Math.floor(Math.random()*playlist.length); }while(r===curIdx && playlist.length>1); return r; }   // shuffle: a different track than the current one
-export function nextTrack(){ if(playlist.length>1) playIndex(state.shuffleOn ? randIdx() : curIdx+1); }
-export function prevTrack(){ if(playlist.length>1) playIndex(curIdx-1); }
+export function nextTrack(){ if(playlist.length>1) (state.crossfadeOn ? playIndexXfade(state.shuffleOn ? randIdx() : curIdx+1, XFADE) : playIndex(state.shuffleOn ? randIdx() : curIdx+1)); }
+export function prevTrack(){ if(playlist.length>1) (state.crossfadeOn ? playIndexXfade(curIdx-1, XFADE) : playIndex(curIdx-1)); }
+// pre-roll: if a crossfade is enabled and the current track is near its end, start the next one
+// overlapping so the transition is seamless (called every frame from main.js). Respects repeat-off-at-end.
+export function checkCrossfade(){
+  if(!state.crossfadeOn || xfadeOut || !curBuffer || !audio.ctx || playlist.length<=1) return;
+  if(state.repeatMode===0 && !state.shuffleOn && curIdx===playlist.length-1) return;   // let the last linear track end naturally
+  const remaining = trackDur - currentElapsed();
+  if(remaining > 0.05 && remaining < XFADE && currentElapsed() > 0.5) {
+    const ni = state.shuffleOn ? randIdx() : curIdx + 1;
+    playIndexXfade(ni, Math.max(0.3, Math.min(XFADE, remaining)));
+  }
+}
 // natural end of a queue track: repeat-one loops via srcNode.loop, repeat-all advances, repeat-off stops after the last linear track
 export function onTrackEnd(){ if(playlist.length<=1) return;
   if(state.repeatMode===0 && !state.shuffleOn && curIdx===playlist.length-1){ stopSources(); playing=false; playState(); }
@@ -227,9 +275,12 @@ export function startDemo(){
 
 export function seekTo(frac){
   if(!curBuffer||!audio.ctx) return;
+  stopXfadeOut();
   const off=Math.max(0,Math.min(frac,0.999))*trackDur;
   try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
-  srcNode=audio.ctx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || state.repeatMode===2; srcNode.connect(audio.analyser);
+  if(srcGain){ try{srcGain.disconnect();}catch(e){} }
+  srcNode=audio.ctx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || state.repeatMode===2;
+  srcGain=audio.ctx.createGain(); srcGain.gain.value=1; srcNode.connect(srcGain); srcGain.connect(audio.analyser);
   srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };
   startCtxTime=audio.ctx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
   srcNode.start(0, off);

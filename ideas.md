@@ -55,7 +55,7 @@ rough.
 - [x] **Waveform overview scrubber** — Decode each track's PCM once and downsample it into a mini waveform drawn on the seek bar, so the bar shows the track's energy/structure (drops, breaks) instead of a bare progress line. (effort: medium)
 - [x] **ID3 metadata + album-art palette tint** — Read ID3v2 tags (title/artist/artwork) from loaded files, surface them in the HUD, and optionally derive a palette from the cover art so the viz inherits the album's mood automatically. (effort: medium)
 - [x] **Per-track look binding** — Tie a look preset (scene + palette + look + router) to a specific track or URL so loading it auto-recalls its intended visual, falling back to the global preset for unbound tracks. (effort: small)
-- [ ] **Crossfade between tracks** — Overlap the outgoing and incoming audio (and optionally crossfade the scene) on track change for seamless DJ-style transitions, instead of the current hard cut at `onTrackEnd`. (effort: medium)
+- [x] **Crossfade between tracks** — Overlap the outgoing and incoming audio (and optionally crossfade the scene) on track change for seamless DJ-style transitions, instead of the current hard cut at `onTrackEnd`. (effort: medium)
 
 ### Scenes & look
 - [x] **Per-scene look params** — Extend per-scene memory from palette alone to the full look-slider set (feedback / swirl / glow / vignette / chroma / grain), so each scene keeps its own tuned feel rather than sharing one global look. (effort: small)

@@ -32,6 +32,7 @@ const autoMixChk = /** @type {HTMLInputElement} */ (document.getElementById('aut
 const beatShiftChk = /** @type {HTMLInputElement} */ (document.getElementById('beatShift')), bpmVal = document.getElementById('bpmVal');
 const agcChk = /** @type {HTMLInputElement} */ (document.getElementById('agc'));
 const artPalChk = /** @type {HTMLInputElement} */ (document.getElementById('artPal'));
+const xfadeChk = /** @type {HTMLInputElement} */ (document.getElementById('xfade'));
 const fpsChk = /** @type {HTMLInputElement} */ (document.getElementById('fpsChk')), fpsVal = document.getElementById('fpsVal');
 const volSlider = /** @type {HTMLInputElement} */ (document.getElementById('vol')), volLbl = document.getElementById('volLbl');
 const psSave = /** @type {HTMLInputElement} */ (document.getElementById('psSave'));
@@ -148,6 +149,7 @@ export function syncAllUI() {
   beatShiftChk.checked = state.beatShiftOn; localStorage.setItem('resomance_beatshift', state.beatShiftOn ? '1' : '0'); if (!state.beatShiftOn) bpmVal.textContent = '--';
   agcChk.checked = state.autoGainOn; localStorage.setItem('resomance_autogain', state.autoGainOn ? '1' : '0');
   artPalChk.checked = state.artPaletteOn; localStorage.setItem('resomance_artpal', state.artPaletteOn ? '1' : '0');
+  xfadeChk.checked = state.crossfadeOn; localStorage.setItem('resomance_xfade', state.crossfadeOn ? '1' : '0');
   fpsChk.checked = state.showFps; localStorage.setItem('resomance_fps', state.showFps ? '1' : '0'); if (!state.showFps) fpsVal.textContent = '';
   // quality seg highlight
   [...qualSeg.children].forEach((b) => b.classList.toggle('on', parseInt(/** @type {HTMLElement} */ (b).dataset.q, 10) === state.qualIdx));
@@ -242,6 +244,8 @@ export function initControls() {
   agcChk.addEventListener('change', () => { state.autoGainOn = agcChk.checked; localStorage.setItem('resomance_autogain', state.autoGainOn ? '1' : '0'); });
   // album-art palette: derive a Custom palette from loaded cover art
   artPalChk.addEventListener('change', () => { state.artPaletteOn = artPalChk.checked; localStorage.setItem('resomance_artpal', state.artPaletteOn ? '1' : '0'); });
+  // track crossfade: overlap outgoing + incoming on track change for seamless transitions
+  xfadeChk.addEventListener('change', () => { state.crossfadeOn = xfadeChk.checked; localStorage.setItem('resomance_xfade', state.crossfadeOn ? '1' : '0'); });
   // ID3 meta → (optionally) derive a palette from the cover art
   on('transport', (e) => { if (e.type === 'meta' && state.artPaletteOn && e.picture) applyArtPalette(e.picture.mime, e.picture.bytes); });
   // per-track look binding: auto-recall a bound look when a track/URL loads
