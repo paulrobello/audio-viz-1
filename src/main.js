@@ -9,6 +9,8 @@ import fsScene from './shaders/scene.frag';
 import fsCopy from './shaders/copy.frag';
 import fsBright from './shaders/bright.frag';
 import fsBlur from './shaders/blur.frag';
+import { state } from './state.js';
+import { idbGetQueue, idbSaveQueue, idbSavePos, idbGetPos, idbGetAudio } from './storage.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
@@ -63,7 +65,7 @@ function makeTarget(w,h){
 let W=0, H=0;
 // quality presets: DPR cap + raymarch step count (Low / Med / High)
 const QUAL=[ {dpr:1.0, rmSteps:48}, {dpr:1.5, rmSteps:80}, {dpr:2.0, rmSteps:120} ];
-let qualIdx = (()=>{ const q=parseInt(localStorage.getItem('resomance_quality'),10); return (q>=0&&q<=2)?q:1; })();
+let qualIdx = state.qualIdx;
 let qual = QUAL[qualIdx];
 function resize(){
   const dpr = Math.min(window.devicePixelRatio || 1, qual.dpr);
@@ -119,59 +121,16 @@ let srcNode=null, demoNodes=null, playing=true, isDemo=false;
 let urlAudio=null, urlMes=null;   // <audio> + MediaElementSource for URL / live-stream playback
 let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
 let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
-let repeatMode = (()=>{ const r=parseInt(localStorage.getItem('resomance_repeat'),10); return (r>=0&&r<=2)?r:1; })();   // 0=off, 1=all (default preserves the looping queue), 2=one
-let shuffleOn = localStorage.getItem('resomance_shuffle')==='1';
+let repeatMode = state.repeatMode;   // 0=off, 1=all (default preserves the looping queue), 2=one
+let shuffleOn = state.shuffleOn;
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
 let beat=0, snare=0, hat=0;            // spectral-flux onset impulses: kick / snare / hat
 let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adaptive onset thresholds
 let loudEMA=0.1;   // rolling loudness estimate for auto-gain
-let autoGainOn = localStorage.getItem('resomance_autogain') !== '0';   // normalize bands so quiet and loud tracks react at full range
+let autoGainOn = state.autoGainOn;   // normalize bands so quiet and loud tracks react at full range
 
-// ---- persist the full playlist queue + position across reloads (IndexedDB: audio > 5MB localStorage quota) ----
-const IDB_DB='resomance', IDB_STORE='audio';
+// ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 let pendingRestore=null;   // {files, idx, pos} restored on first gesture
-function idbOpen(){
-  return new Promise((res)=>{
-    const r=indexedDB.open(IDB_DB,1);
-    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE); };
-    r.onsuccess=()=>res(r.result); r.onerror=()=>res(null);
-  });
-}
-async function idbGetAudio(){   // legacy single-track cache (fallback for pre-queue installs)
-  const db=await idbOpen(); if(!db) return null;
-  return new Promise((res)=>{ try{
-    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('last');
-    req.onsuccess=()=>res(req.result||null); req.onerror=()=>res(null);
-  }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
-}
-async function idbSaveQueue(files){
-  const db=await idbOpen(); if(!db) return;
-  try{ const tx=db.transaction(IDB_STORE,'readwrite');
-    tx.objectStore(IDB_STORE).put(files.map(f=>({blob:f,name:f.name,type:f.type,size:f.size})),'queue');
-    tx.oncomplete=()=>{ try{db.close();}catch(_){} }; tx.onerror=()=>{ try{db.close();}catch(_){} };
-  }catch(e){ try{db.close();}catch(_){} }
-}
-async function idbGetQueue(){
-  const db=await idbOpen(); if(!db) return null;
-  return new Promise((res)=>{ try{
-    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('queue');
-    req.onsuccess=()=>{ const a=req.result; res(a&&a.length? a.map(r=>new File([r.blob], r.name||'track', {type:r.type||'audio/*'})) : null); };
-    req.onerror=()=>res(null);
-  }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
-}
-async function idbSavePos(obj){
-  const db=await idbOpen(); if(!db) return;
-  try{ const tx=db.transaction(IDB_STORE,'readwrite');
-    tx.objectStore(IDB_STORE).put(obj,'pos'); tx.oncomplete=()=>{ try{db.close();}catch(_){} }; tx.onerror=()=>{ try{db.close();}catch(_){} };
-  }catch(e){ try{db.close();}catch(_){} }
-}
-async function idbGetPos(){
-  const db=await idbOpen(); if(!db) return null;
-  return new Promise((res)=>{ try{
-    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('pos');
-    req.onsuccess=()=>res(req.result||null); req.onerror=()=>res(null);
-  }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
-}
 function setTrackName(name){ document.getElementById('sub').textContent=name; }
 function currentElapsed(){ if(!curBuffer||!audioCtx) return 0; return Math.max(0,(audioCtx.currentTime-startCtxTime)%trackDur); }
 function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
@@ -195,8 +154,7 @@ function ensureCtx(){
     analyser.smoothingTimeConstant = 0.82;
     freq = new Uint8Array(analyser.frequencyBinCount);
     masterVol = audioCtx.createGain();
-    const v = parseFloat(localStorage.getItem('resomance_vol'));
-    masterVol.gain.value = isNaN(v)?0.9:v;
+    masterVol.gain.value = state.volume;
     // analyser taps the FULL pre-volume signal so the viz stays full at any listening level
     analyser.connect(masterVol);
     masterVol.connect(audioCtx.destination);
@@ -372,34 +330,27 @@ let bpm=0, paletteShift=0, prevBeat=0, shockStart=-10; const beatTimes=[];   // 
 let beatPulse=false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
-const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06, vig:0, ca:0, grain:0};
-let look; try{ look=Object.assign({}, LOOK_DEFAULT, JSON.parse(localStorage.getItem('resomance_look')||'{}')); }catch(e){ look=Object.assign({}, LOOK_DEFAULT); }
+let look = state.look;
 // reactivity router: map onset sources (kick/snare/hat/bass) onto look params (swirl/glow/feedback)
-const ROUTE_DEFAULT={kick:'feedback', snare:'swirl', hat:'glow', bass:'none'};
-let router; try{ router=Object.assign({}, ROUTE_DEFAULT, JSON.parse(localStorage.getItem('resomance_router')||'{}')); }catch(e){ router=Object.assign({}, ROUTE_DEFAULT); }
+let router = state.router;
 // custom cosine-palette editor (a/b/c/d vectors), persisted
-const CUSTOMPAL_DEFAULT={a:[0.5,0.5,0.5], b:[0.5,0.5,0.5], c:[1,1,1], d:[0,0.33,0.67]};
-let customPal; (()=>{ try{ customPal=JSON.parse(JSON.stringify(CUSTOMPAL_DEFAULT));
-  const s=JSON.parse(localStorage.getItem('resomance_custompal')||'{}');
-  for(const k of ['a','b','c','d']) if(Array.isArray(s[k])&&s[k].length===3) customPal[k]=s[k].map(Number); }catch(e){ customPal=JSON.parse(JSON.stringify(CUSTOMPAL_DEFAULT)); } })();
+let customPal = state.customPal;
 function v2h(v){ return '#'+v.map(x=>Math.max(0,Math.min(255,Math.round(x*255))).toString(16).padStart(2,'0')).join(''); }
 function h2v(h){ return (h.replace('#','').match(/.{2}/g)||[]).map(x=>parseInt(x,16)/255); }
 function syncColorInputs(){ const map={cpA:'a',cpB:'b',cpC:'c',cpD:'d'}; for(const id in map){ const el=document.getElementById(id); if(el) el.value=v2h(customPal[map[id]]); } }
 function syncPalEditor(){ const w=document.getElementById('palEdit'); if(!w) return; w.style.display = curStyle===4?'flex':'none'; if(curStyle===4) syncColorInputs(); }
 // persisted look settings (volume is persisted separately in its own handler)
-let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=5)?m:0; })();
+let curMode = state.curMode;
 // per-scene palette memory: each scene remembers its own palette index (0..4)
-let scenePalette; (()=>{ try{ const a=JSON.parse(localStorage.getItem('resomance_scene_palette')||'null'); if(Array.isArray(a)) scenePalette=a.map(Number); }catch(e){}
-  if(!scenePalette||!scenePalette.length){ const lg=parseFloat(localStorage.getItem('resomance_palette')); const v=(lg>=0&&lg<=4)?lg:0; scenePalette=[v,v,v,v]; }   // seed from the legacy global palette
-  while(scenePalette.length<6) scenePalette.push(0);
-  localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette)); })();
+let scenePalette = state.scenePalette;
+localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette));   // normalize on-disk (pad to len 6), as before
 let curStyle = scenePalette[curMode]||0;
-let ringOn = localStorage.getItem('resomance_ring') !== '0';
-let autoHide = localStorage.getItem('resomance_autohide') !== '0';
+let ringOn = state.ringOn;
+let autoHide = state.autoHide;
 // scene crossfade + auto-mix state (declared after curMode to avoid a TDZ on the modeA initializer)
 const AUTO_MIX_INTERVAL=14, AUTO_MIX_DUR=0.7;
 let modeA=curMode, modeB=curMode, blend=0;
-let autoMixOn = localStorage.getItem('resomance_automix')==='1';
+let autoMixOn = state.autoMixOn;
 let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null, mixArmedAt=null;
 function clockSec(){ return (performance.now()-t0)/1000; }
 // orbit camera (drag) state for the raymarch scenes
@@ -611,7 +562,7 @@ applyModeUI();
 styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide; syncPalEditor();
 // volume
 const volSlider=document.getElementById('vol'), volLbl=document.getElementById('volLbl');
-const savedVol=parseFloat(localStorage.getItem('resomance_vol'));
+const savedVol=state.volume;
 if(!isNaN(savedVol)){ volSlider.value=savedVol; volLbl.textContent=Math.round(savedVol*100)+'%'; }
 volSlider.addEventListener('input', e=>{
   const v=parseFloat(e.target.value);
@@ -661,12 +612,12 @@ function setQuality(i){ qualIdx=i; qual=QUAL[i]; localStorage.setItem('resomance
 qualSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-q]'); if(b) setQuality(parseInt(b.dataset.q,10)); });
 [...qualSeg.children].forEach(b=>b.classList.toggle('on', parseInt(b.dataset.q,10)===qualIdx));
 const fpsChk=document.getElementById('fpsChk'), fpsVal=document.getElementById('fpsVal');
-let showFps = localStorage.getItem('resomance_fps')==='1';
+let showFps = state.showFps;
 fpsChk.checked=showFps; if(!showFps) fpsVal.textContent='';
 fpsChk.addEventListener('change', e=>{ showFps=e.target.checked; localStorage.setItem('resomance_fps', showFps?'1':'0'); if(!showFps) fpsVal.textContent='--'; });
 // beat-aware palette shift toggle (BPM estimate drives palette rotation)
 const beatShiftChk=document.getElementById('beatShift'), bpmVal=document.getElementById('bpmVal');
-let beatShiftOn = localStorage.getItem('resomance_beatshift')==='1';
+let beatShiftOn = state.beatShiftOn;
 beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
 beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
 // auto-gain toggle: normalize band levels against rolling loudness (default on; ~1x for normal-level tracks)
@@ -675,7 +626,7 @@ agcChk.checked=autoGainOn;
 agcChk.addEventListener('change', e=>{ autoGainOn=e.target.checked; localStorage.setItem('resomance_autogain', autoGainOn?'1':'0'); });
 // keyboard
 // ---------- named look presets (snapshot slots), recalled with Shift+1..8 ----------
-let presets; try{ presets=JSON.parse(localStorage.getItem('resomance_presets')||'null'); if(!Array.isArray(presets)) presets=[]; }catch(e){ presets=[]; }
+let presets = state.presets;
 while(presets.length<8) presets.push(null);
 function syncLookSliders(){ for(const k of ['feedback','swirl','glow','vig','ca','grain']){ const el=document.getElementById('lk'+k.charAt(0).toUpperCase()+k.slice(1)); if(el) el.value=look[k]; } }
 function syncRouterUI(){ for(const [id,src] of [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']]){ const s=document.getElementById(id); if(s) s.value=router[src]; } }
