@@ -8,3 +8,6 @@ declare module '*.frag' {
   const src: string;
   export default src;
 }
+// Vite imports CSS as side-effect modules (import './styles.css'). TS 5.5+ (TS2882) errors on
+// side-effect imports without a declaration, so allow it as an empty module.
+declare module '*.css';
