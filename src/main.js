@@ -7,7 +7,8 @@ import './styles.css';
 import { state, on } from './state.js';
 import { audio, analyze } from './audio.js';
 import * as pb from './playback.js';
-import { gl, vao, targets, programs, specTex, specData, NBINS, resize, setQuality, rebuildSceneProgram, getQual, fsScene } from './gl.js';
+import { resize, setQuality } from './gl.js';
+import { initRender, renderFrame, requestScreenshot, compileUserShader } from './render.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
@@ -15,28 +16,8 @@ window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\
 const canvas = document.getElementById('gl');
 window.addEventListener('resize', resize);   // gl.js performs the initial resize() at module load
 
-function uni(p,n){ return gl.getUniformLocation(p,n); }
-function buildSceneU(p){
-  return {
-    res:uni(p,'u_res'), time:uni(p,'u_time'),
-    bass:uni(p,'u_bass'), mid:uni(p,'u_mid'),
-    treble:uni(p,'u_treble'), level:uni(p,'u_level'),
-    centroid:uni(p,'u_centroid'), beat:uni(p,'u_beat'), shock:uni(p,'u_shock'),
-    snare:uni(p,'u_snare'), hat:uni(p,'u_hat'),
-    style:uni(p,'u_style'), modeA:uni(p,'u_modeA'), modeB:uni(p,'u_modeB'), blend:uni(p,'u_blend'),
-    camYaw:uni(p,'u_camYaw'), camPitch:uni(p,'u_camPitch'), orbit:uni(p,'u_orbit'), zoom:uni(p,'u_zoom'),
-    specOn:uni(p,'u_specOn'), prev:uni(p,'u_prev'), spec:uni(p,'u_spec'),
-    reducedMotion:uni(p,'u_reducedMotion'),
-    feedback:uni(p,'u_feedback'), swirl:uni(p,'u_swirl'), glow:uni(p,'u_glow'),
-    rmSteps:uni(p,'u_rmSteps'),
-    pa:uni(p,'u_pa'), pb:uni(p,'u_pb'), pc:uni(p,'u_pc'), pd:uni(p,'u_pd'),
-    paletteShift:uni(p,'u_paletteShift'),
-  };
-}
-let U = buildSceneU(programs.scene);   // rebuilt (buildSceneU) whenever the scene program is recompiled for a user shader
-const UC = { tex:uni(programs.copy,'u_tex'), bloom:uni(programs.copy,'u_bloom'), res:uni(programs.copy,'u_res'), bloomAmt:uni(programs.copy,'u_bloomAmt'), vig:uni(programs.copy,'u_vig'), ca:uni(programs.copy,'u_ca'), grain:uni(programs.copy,'u_grain'), beat:uni(programs.copy,'u_beat'), time:uni(programs.copy,'u_time') };
-const UB = { tex:uni(programs.bright,'u_tex'), res:uni(programs.bright,'u_res'), thresh:uni(programs.bright,'u_thresh') };
-const UBL = { tex:uni(programs.blur,'u_tex'), res:uni(programs.blur,'u_res'), dir:uni(programs.blur,'u_dir') };
+// build the uniform-location caches (U/UC/UB/UBL) + recompile any saved user shader
+initRender();
 
 // ---------- transport bus: playback.js → view (UI updates that used to be inline) ----------
 on('transport', (e) => {
@@ -53,13 +34,12 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('beforeunload', pb.saveQueuePos);
 
 // ---------- RENDER ----------
-// accessibility: respect OS reduced-motion (calm swirl, trails, and beat flashes)
-let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
+// accessibility: respect OS reduced-motion (calm swirl, trails, and beat flashes).
+// state.reducedMotion is the source of truth read by render.js each frame; keep it live.
+window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> state.reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0, lastFrame=0, fpsEMA=0;
 let bpm=0, paletteShift=0, prevBeat=0, shockStart=-10; const beatTimes=[];   // beat-aware palette shift + shockwave origin
 let beatPulse=false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
-let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 let look = state.look;
 // reactivity router: map onset sources (kick/snare/hat/bass) onto look params (swirl/glow/feedback)
@@ -91,7 +71,6 @@ function frame(now){
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
   if(dt>0){ const inst=1000/dt; fpsEMA = fpsEMA? fpsEMA*0.9+inst*0.1 : inst; }
   analyze(); resize();
-  if(audio.freq){ for(let i=0;i<NBINS;i++){ specData[i]=audio.freq[i]; } }   // first NBINS of spectrum for the ring (moved out of analyze with freq)
   beatPulse=false;
   // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
   if(audio.beat>prevBeat+0.5){ beatPulse=true; beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
@@ -109,73 +88,9 @@ function frame(now){
       if(k>=1){ curMode=mixTrans.to; modeA=modeB=curMode; blend=0; mixTrans=null; autoMixNext=time+AUTO_MIX_INTERVAL; applyModeUI(); } }
   }
 
-  // upload spectrum
-  gl.bindTexture(gl.TEXTURE_2D, specTex);
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NBINS, 1, gl.RED, gl.UNSIGNED_BYTE, specData);
+  // render: spectrum upload + scene + bloom + composite + (optional) screenshot + ping-pong swap
+  renderFrame({ time, modeA, modeB, blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw, camPitch, camZoom, orbitActive });
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.fboB);
-  gl.viewport(0,0,targets.W,targets.H);
-  gl.useProgram(programs.scene); gl.bindVertexArray(vao);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texA);
-  gl.uniform1i(U.prev,0);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, specTex);
-  gl.uniform1i(U.spec,1);
-  gl.uniform2f(U.res,targets.W,targets.H); gl.uniform1f(U.time,time);
-  gl.uniform1f(U.bass,audio.bands.bass); gl.uniform1f(U.mid,audio.bands.mid);
-  gl.uniform1f(U.treble,audio.bands.treble); gl.uniform1f(U.level,audio.bands.level);
-  gl.uniform1f(U.centroid,audio.bands.centroid); gl.uniform1f(U.beat, reducedMotion?audio.beat*0.2:audio.beat);
-  gl.uniform1f(U.shock, reducedMotion?Math.min(1,(time-shockStart)/0.6)*0.15:Math.min(1,(time-shockStart)/0.6));
-  gl.uniform1f(U.snare, reducedMotion?audio.snare*0.2:audio.snare); gl.uniform1f(U.hat, reducedMotion?audio.hat*0.2:audio.hat);
-  gl.uniform1f(U.paletteShift, beatShiftOn?paletteShift:0);
-  gl.uniform1f(U.style,curStyle); gl.uniform1f(U.modeA,modeA); gl.uniform1f(U.modeB,modeB); gl.uniform1f(U.blend,blend);
-  gl.uniform1f(U.camYaw, camYaw); gl.uniform1f(U.camPitch, camPitch); gl.uniform1f(U.orbit, orbitActive?1:0); gl.uniform1f(U.zoom, camZoom);
-  gl.uniform1f(U.specOn, ringOn?1:0);
-  gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
-  // reactivity router: add onset-driven modulation to the look params (clamped to each slider's range)
-  let rSw=0,rGl=0,rFb=0; const rv={kick:audio.beat,snare:audio.snare,hat:audio.hat,bass:audio.bands.bass};
-  for(const s in router){ const v=rv[s]||0; if(router[s]==='swirl') rSw+=v; else if(router[s]==='glow') rGl+=v; else if(router[s]==='feedback') rFb+=v; }
-  gl.uniform1f(U.feedback, Math.max(0,Math.min(0.97,look.feedback+rFb*0.04))); gl.uniform1f(U.swirl, Math.max(0,Math.min(0.02,look.swirl+rSw*0.008))); gl.uniform1f(U.glow, Math.max(0,Math.min(0.3,look.glow+rGl*0.12)));
-  gl.uniform1i(U.rmSteps, getQual().rmSteps);
-  gl.uniform3f(U.pa, customPal.a[0],customPal.a[1],customPal.a[2]); gl.uniform3f(U.pb, customPal.b[0],customPal.b[1],customPal.b[2]);
-  gl.uniform3f(U.pc, customPal.c[0],customPal.c[1],customPal.c[2]); gl.uniform3f(U.pd, customPal.d[0],customPal.d[1],customPal.d[2]);
-  gl.drawArrays(gl.TRIANGLES,0,3);
-
-  // --- bloom: bright-pass into a half-res buffer ---
-  gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboA);
-  gl.viewport(0,0,targets.BW,targets.BH);
-  gl.useProgram(programs.bright);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
-  gl.uniform1i(UB.tex,0); gl.uniform2f(UB.res,targets.W,targets.H); gl.uniform1f(UB.thresh, 0.6);
-  gl.drawArrays(gl.TRIANGLES,0,3);
-  // --- bloom: separable 9-tap Gaussian, two horizontal/vertical rounds ---
-  gl.useProgram(programs.blur);
-  for(let pass=0; pass<2; pass++){
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboB);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexA);
-    gl.uniform1i(UBL.tex,0); gl.uniform2f(UBL.res,targets.BW,targets.BH); gl.uniform2f(UBL.dir, 1.0/Math.max(1,targets.BW), 0.0);
-    gl.drawArrays(gl.TRIANGLES,0,3);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.bloomFboA);
-    gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexB);
-    gl.uniform2f(UBL.dir, 0.0, 1.0/Math.max(1,targets.BH));
-    gl.drawArrays(gl.TRIANGLES,0,3);
-  }
-  // --- composite: scene + blurred bloom, tonemapped to screen (intensified on beats) ---
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  gl.viewport(0,0,targets.W,targets.H);
-  gl.useProgram(programs.copy);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexA);
-  gl.uniform1i(UC.tex,0); gl.uniform1i(UC.bloom,1); gl.uniform2f(UC.res,targets.W,targets.H);
-  gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion?audio.beat*0.2:audio.beat*1.1));
-  gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion?audio.beat*0.2:audio.beat); gl.uniform1f(UC.time, time);
-  gl.drawArrays(gl.TRIANGLES,0,3);
-  if(pendingShot){ pendingShot=false;   // capture right after the copy pass so the buffer is valid
-    canvas.toBlob(b=>{ if(!b) return; const a=document.createElement('a');
-      a.href=URL.createObjectURL(b); a.download='resomance-'+Date.now()+'.png';
-      a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }, 'image/png');
-    toast('screenshot saved'); }
-
-  let t2=targets.texA; targets.texA=targets.texB; targets.texB=t2; let f2=targets.fboA; targets.fboA=targets.fboB; targets.fboB=f2;
   if(now-lastUI>50){ lastUI=now; updateMeters(); updateSeek(); if(showFps) fpsVal.textContent=Math.round(fpsEMA)+' fps'; if(beatShiftOn&&bpm) bpmVal.textContent=bpm+' bpm'; }
   requestAnimationFrame(frame);
 }
@@ -258,14 +173,14 @@ function setMode(m){ curMode=m; modeA=modeB=m; blend=0; mixTrans=null; mixArmedA
 modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(b) setMode(parseInt(b.dataset.mode,10)); });
 // palette
 const styleSel=document.getElementById('style');
-function applyScenePalette(m){ curStyle=scenePalette[m]||0; styleSel.value=String(curStyle); syncPalEditor(); }   // recall a scene's remembered palette into the active uniform + UI
-function setStyle(s){ curStyle=s; scenePalette[curMode]=s; styleSel.value=String(s); localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette)); syncPalEditor(); }
+function applyScenePalette(m){ curStyle=scenePalette[m]||0; state.curStyle=curStyle; styleSel.value=String(curStyle); syncPalEditor(); }   // recall a scene's remembered palette into the active uniform + UI
+function setStyle(s){ curStyle=s; state.curStyle=curStyle; scenePalette[curMode]=s; styleSel.value=String(s); localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette)); syncPalEditor(); }
 styleSel.addEventListener('change', e=> setStyle(parseFloat(e.target.value)));
 // custom palette editor: a/b/c/d color pickers
 [['cpA','a'],['cpB','b'],['cpC','c'],['cpD','d']].forEach(([id,k])=> document.getElementById(id).addEventListener('input', e=>{ customPal[k]=h2v(e.target.value); localStorage.setItem('resomance_custompal', JSON.stringify(customPal)); }));
 // ring toggle
 const ringChk=document.getElementById('ring');
-function setRing(on){ ringOn=on; ringChk.checked=on; localStorage.setItem('resomance_ring', on?'1':'0'); }
+function setRing(on){ ringOn=on; state.ringOn=on; ringChk.checked=on; localStorage.setItem('resomance_ring', on?'1':'0'); }
 ringChk.addEventListener('change', e=> setRing(e.target.checked));
 // auto-hide HUD toggle
 const autohideChk=document.getElementById('autohide');
@@ -298,21 +213,13 @@ bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow
 const shaderToggle=document.getElementById('shaderToggle'), shaderPanel=document.getElementById('shaderPanel');
 shaderToggle.addEventListener('click', ()=> shaderPanel.style.display = shaderPanel.style.display==='none'?'flex':'none');
 const shaderCode=document.getElementById('shaderCode'), shaderCompile=document.getElementById('shaderCompile'), shaderMsg=document.getElementById('shaderMsg');
-function compileUserShader(){
-  const code=shaderCode.value;
-  const src=fsScene.replace(/\/\/ USER_SHADER_BEGIN[\s\S]*?\/\/ USER_SHADER_END/, '// USER_SHADER_BEGIN\n'+code+'\n  // USER_SHADER_END');
-  try{
-    rebuildSceneProgram(src); U=buildSceneU(programs.scene);
-    localStorage.setItem('resomance_usershader', code);
-    shaderMsg.textContent='compiled ✓'; shaderMsg.style.color='#7fd0a0'; shaderCode.title='';
-  }catch(e){
-    shaderMsg.textContent='compile error (see tooltip/console)'; shaderMsg.style.color='#ff7a8a';
-    shaderCode.title=e.message; console.error('user shader error:\n'+e.message);
-  }
-}
-shaderCompile.addEventListener('click', compileUserShader);
+shaderCompile.addEventListener('click', () => {
+  const r = compileUserShader(shaderCode.value);
+  if(r.ok){ shaderMsg.textContent='compiled ✓'; shaderMsg.style.color='#7fd0a0'; shaderCode.title=''; }
+  else { shaderMsg.textContent='compile error (see tooltip/console)'; shaderMsg.style.color='#ff7a8a'; shaderCode.title=r.error; }
+});
 shaderCode.value = localStorage.getItem('resomance_usershader') || 'return palette(u_time*0.1 + u_bass + length(uv)*0.3) * (0.3 + u_bass);';
-if(localStorage.getItem('resomance_usershader')) compileUserShader();   // recompile the saved shader on load
+// initRender() (called at boot) recompiles the saved user shader, if any
 // reactivity router: source -> target selects (kick/snare/hat/bass -> none/swirl/glow/feedback), persisted
 const RT_OPTS=['none','swirl','glow','feedback'];
 [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']].forEach(([id,src])=>{
@@ -334,7 +241,7 @@ fpsChk.addEventListener('change', e=>{ showFps=e.target.checked; localStorage.se
 const beatShiftChk=document.getElementById('beatShift'), bpmVal=document.getElementById('bpmVal');
 let beatShiftOn = state.beatShiftOn;
 beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
-beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
+beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; state.beatShiftOn=beatShiftOn; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
 // auto-gain toggle: normalize band levels against rolling loudness (default on; ~1x for normal-level tracks)
 const agcChk=document.getElementById('agc');
 agcChk.checked=state.autoGainOn;
@@ -378,7 +285,7 @@ window.addEventListener('keydown', e=>{
   if(e.shiftKey && e.code.startsWith('Digit')){ const n=parseInt(e.code.slice(5),10); if(n>=1&&n<=8){ e.preventDefault(); if(e.ctrlKey||e.metaKey) savePreset(n-1); else recallPreset(n-1); return; } }
   if(e.key>='1'&&e.key<='6') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
-  if(e.key==='s'||e.key==='S') pendingShot=true;
+  if(e.key==='s'||e.key==='S') requestScreenshot();
   if(e.key==='f'||e.key==='F') toggleFullscreen();
   if((e.key==='ArrowRight'||e.key==='ArrowLeft') && document.activeElement!==seekEl){ e.preventDefault(); e.key==='ArrowRight'?pb.nextTrack():pb.prevTrack(); }
   poke();   // any other key counts as activity
