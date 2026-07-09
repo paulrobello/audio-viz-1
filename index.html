@@ -207,6 +207,13 @@
         <label class="chk">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
         <label class="chk">swirl <input type="range" id="lkSwirl" min="0" max="0.02" step="0.0005" value="0.004" style="width:120px;"></label>
         <label class="chk">glow <input type="range" id="lkGlow" min="0" max="0.3" step="0.005" value="0.06" style="width:120px;"></label>
+        <div class="row" style="gap:7px; flex-wrap:wrap; align-items:center;">
+          <span class="label">route</span>
+          <label class="chk">kick <select id="rtKick"></select></label>
+          <label class="chk">snare <select id="rtSnare"></select></label>
+          <label class="chk">hat <select id="rtHat"></select></label>
+          <label class="chk">bass <select id="rtBass"></select></label>
+        </div>
       </div>
     </div>
   </div>
@@ -888,6 +895,9 @@ let pendingShot=false;   // screenshot queued by the S hotkey, captured at end o
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
 let look; try{ look=Object.assign({}, LOOK_DEFAULT, JSON.parse(localStorage.getItem('resomance_look')||'{}')); }catch(e){ look=Object.assign({}, LOOK_DEFAULT); }
+// reactivity router: map onset sources (kick/snare/hat/bass) onto look params (swirl/glow/feedback)
+const ROUTE_DEFAULT={kick:'feedback', snare:'swirl', hat:'glow', bass:'none'};
+let router; try{ router=Object.assign({}, ROUTE_DEFAULT, JSON.parse(localStorage.getItem('resomance_router')||'{}')); }catch(e){ router=Object.assign({}, ROUTE_DEFAULT); }
 // custom cosine-palette editor (a/b/c/d vectors), persisted
 const CUSTOMPAL_DEFAULT={a:[0.5,0.5,0.5], b:[0.5,0.5,0.5], c:[1,1,1], d:[0,0.33,0.67]};
 let customPal; (()=>{ try{ customPal=JSON.parse(JSON.stringify(CUSTOMPAL_DEFAULT));
@@ -959,7 +969,10 @@ function frame(now){
   gl.uniform1f(U.camYaw, camYaw); gl.uniform1f(U.camPitch, camPitch); gl.uniform1f(U.orbit, orbitActive?1:0);
   gl.uniform1f(U.specOn, ringOn?1:0);
   gl.uniform1f(U.reducedMotion, reducedMotion?1:0);
-  gl.uniform1f(U.feedback, look.feedback); gl.uniform1f(U.swirl, look.swirl); gl.uniform1f(U.glow, look.glow);
+  // reactivity router: add onset-driven modulation to the look params (clamped to each slider's range)
+  let rSw=0,rGl=0,rFb=0; const rv={kick:beat,snare:snare,hat:hat,bass:bands.bass};
+  for(const s in router){ const v=rv[s]||0; if(router[s]==='swirl') rSw+=v; else if(router[s]==='glow') rGl+=v; else if(router[s]==='feedback') rFb+=v; }
+  gl.uniform1f(U.feedback, Math.max(0,Math.min(0.97,look.feedback+rFb*0.04))); gl.uniform1f(U.swirl, Math.max(0,Math.min(0.02,look.swirl+rSw*0.008))); gl.uniform1f(U.glow, Math.max(0,Math.min(0.3,look.glow+rGl*0.12)));
   gl.uniform1i(U.rmSteps, qual.rmSteps);
   gl.uniform3f(U.pa, customPal.a[0],customPal.a[1],customPal.a[2]); gl.uniform3f(U.pb, customPal.b[0],customPal.b[1],customPal.b[2]);
   gl.uniform3f(U.pc, customPal.c[0],customPal.c[1],customPal.c[2]); gl.uniform3f(U.pd, customPal.d[0],customPal.d[1],customPal.d[2]);
@@ -1127,6 +1140,14 @@ lookToggle.addEventListener('click', ()=> lookPanel.style.display = lookPanel.st
 function bindLook(id,key){ const el=document.getElementById(id); el.value=look[key];
   el.addEventListener('input', e=>{ look[key]=parseFloat(e.target.value); localStorage.setItem('resomance_look', JSON.stringify(look)); }); }
 bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow','glow');
+// reactivity router: source -> target selects (kick/snare/hat/bass -> none/swirl/glow/feedback), persisted
+const RT_OPTS=['none','swirl','glow','feedback'];
+[['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']].forEach(([id,src])=>{
+  const sel=document.getElementById(id);
+  RT_OPTS.forEach(o=>{ const op=document.createElement('option'); op.value=o; op.textContent=o; sel.appendChild(op); });
+  sel.value=router[src];
+  sel.addEventListener('change', e=>{ router[src]=e.target.value; localStorage.setItem('resomance_router', JSON.stringify(router)); });
+});
 // quality preset (DPR cap + raymarch steps) + FPS meter
 const qualSeg=document.getElementById('qualSeg');
 function setQuality(i){ qualIdx=i; qual=QUAL[i]; localStorage.setItem('resomance_quality', String(i));

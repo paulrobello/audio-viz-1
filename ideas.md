@@ -29,7 +29,7 @@ UX/perf/integration. Effort is rough.
 
 ## Audio analysis & reactivity
 - [x] **Auto-gain / reactivity calibration** — Normalize bass/mid/treble against a rolling loudness estimate so both quiet and loud tracks react at full range, instead of today's fixed thresholds under/over-triggering depending on the master level. (effort: medium)
-- [ ] **Reactivity router (map kick/snare/hat to visuals)** — The `u_snare`/`u_hat` uniforms are detected but barely wired; add a small mapping UI so users can route kick/snare/hat/bass to chosen visual params (e.g. snare→swirl, hat→glow, kick→shockwave intensity). (effort: medium)
+- [x] **Reactivity router (map kick/snare/hat to visuals)** — The `u_snare`/`u_hat` uniforms are detected but barely wired; add a small mapping UI so users can route kick/snare/hat/bass to chosen visual params (e.g. snare→swirl, hat→glow, kick→shockwave intensity). (effort: medium)
 
 ## UX, performance & integration
 - [ ] **Named look presets / snapshot slots** — Save and recall the full visual state (scene + palette + look sliders + toggles) into named slots switchable with keys, so polished looks can be queued and recalled during a set. (effort: medium)
