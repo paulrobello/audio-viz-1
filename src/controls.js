@@ -45,7 +45,7 @@ function syncPalEditor() { const w = document.getElementById('palEdit'); if (!w)
 // ---------- scene segmented selector ----------
 export function applyModeUI() { [...modeSeg.children].forEach((x) => x.classList.toggle('on', parseInt(/** @type {HTMLElement} */ (x).dataset.mode, 10) === state.curMode)); }
 // recall a scene's remembered palette into the active uniform + UI
-export function applyScenePalette(m) { const s = state.scenePalette[m] || 0; state.curStyle = s; styleSel.value = String(s); syncPalEditor(); }
+export function applyScenePalette(m) { const s = state.scenePalette[m] || 0; state.curStyle = s; styleSel.value = String(s); syncPalEditor(); state.look = state.sceneLook[m] || state.look; syncLookSliders(); }
 export function setMode(m) {
   state.curMode = m; state.modeA = state.modeB = m; state.blend = 0; state.mixTrans = null; state.mixArmedAt = null;
   applyModeUI(); applyScenePalette(m); localStorage.setItem('resomance_scene', String(m));
@@ -54,6 +54,10 @@ export function setMode(m) {
 function setStyle(s) { state.curStyle = s; state.scenePalette[state.curMode] = s; styleSel.value = String(s); localStorage.setItem('resomance_scene_palette', JSON.stringify(state.scenePalette)); syncPalEditor(); }
 // cycle the current scene's palette forward/backward (keyboard-friendly wrapper over setStyle)
 function cycleStyle(dir) { setStyle((state.curStyle + dir + 5) % 5); }
+// push the live per-scene look (state.look) back into the six look sliders
+function syncLookSliders() {
+  for (const k of ['feedback', 'swirl', 'glow', 'vig', 'ca', 'grain']) { const el = /** @type {HTMLInputElement} */ (document.getElementById('lk' + k.charAt(0).toUpperCase() + k.slice(1))); if (el) el.value = state.look[k]; }
+}
 function setRing(on) { state.ringOn = on; ringChk.checked = on; localStorage.setItem('resomance_ring', on ? '1' : '0'); }
 
 // ---------- presets (snapshot slots), recalled with Shift+1..8 ----------
@@ -79,9 +83,11 @@ export function syncAllUI() {
   styleSel.value = String(state.curStyle);
   syncPalEditor(); syncColorInputs();
   localStorage.setItem('resomance_scene_palette', JSON.stringify(state.scenePalette));
-  // look sliders (feedback/swirl/glow/vig/ca/grain)
-  for (const k of ['feedback', 'swirl', 'glow', 'vig', 'ca', 'grain']) { const el = /** @type {HTMLInputElement} */ (document.getElementById('lk' + k.charAt(0).toUpperCase() + k.slice(1))); if (el) el.value = state.look[k]; }
+  // look sliders (feedback/swirl/glow/vig/ca/grain) — per-scene: repoint the live look, repaint, persist the array
+  state.look = state.sceneLook[state.curMode];
+  syncLookSliders();
   localStorage.setItem('resomance_look', JSON.stringify(state.look));
+  localStorage.setItem('resomance_scene_look', JSON.stringify(state.sceneLook));
   // reactivity router selects
   for (const [id, src] of [['rtKick', 'kick'], ['rtSnare', 'snare'], ['rtHat', 'hat'], ['rtBass', 'bass']]) { const s = /** @type {HTMLSelectElement} */ (document.getElementById(id)); if (s) s.value = state.router[src]; }
   localStorage.setItem('resomance_router', JSON.stringify(state.router));
@@ -143,7 +149,7 @@ export function initControls() {
   // look panel: feedback / swirl / glow / vig / ca / grain sliders, persisted like volume
   lookToggle.addEventListener('click', () => (lookPanel.style.display = lookPanel.style.display === 'none' ? 'flex' : 'none'));
   const LK = [['lkFeedback', 'feedback'], ['lkSwirl', 'swirl'], ['lkGlow', 'glow'], ['lkVig', 'vig'], ['lkCa', 'ca'], ['lkGrain', 'grain']];
-  LK.forEach(([id, key]) => { const el = /** @type {HTMLInputElement} */ (document.getElementById(id)); el.addEventListener('input', () => { state.look[key] = parseFloat(el.value); localStorage.setItem('resomance_look', JSON.stringify(state.look)); }); });
+  LK.forEach(([id, key]) => { const el = /** @type {HTMLInputElement} */ (document.getElementById(id)); el.addEventListener('input', () => { state.look[key] = parseFloat(el.value); localStorage.setItem('resomance_look', JSON.stringify(state.look)); localStorage.setItem('resomance_scene_look', JSON.stringify(state.sceneLook)); }); });
 
   // user shader: paste a vec3 scene body, compiled into the scene program at runtime (compile errors reported)
   shaderToggle.addEventListener('click', () => (shaderPanel.style.display = shaderPanel.style.display === 'none' ? 'flex' : 'none'));

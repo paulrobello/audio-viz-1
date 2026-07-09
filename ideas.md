@@ -58,7 +58,7 @@ rough.
 - [ ] **Crossfade between tracks** — Overlap the outgoing and incoming audio (and optionally crossfade the scene) on track change for seamless DJ-style transitions, instead of the current hard cut at `onTrackEnd`. (effort: medium)
 
 ### Scenes & look
-- [ ] **Per-scene look params** — Extend per-scene memory from palette alone to the full look-slider set (feedback / swirl / glow / vignette / chroma / grain), so each scene keeps its own tuned feel rather than sharing one global look. (effort: small)
+- [x] **Per-scene look params** — Extend per-scene memory from palette alone to the full look-slider set (feedback / swirl / glow / vignette / chroma / grain), so each scene keeps its own tuned feel rather than sharing one global look. (effort: small)
 - [ ] **Audio-reactive particle / galaxy scene (7th scene)** — Add a GPU-instanced particle field (star swirl / galaxy) driven by the spectrum texture, giving auto-mix a distinctly different aesthetic alongside the raymarched scenes. (effort: large)
 
 ### UX & platform

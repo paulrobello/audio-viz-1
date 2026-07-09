@@ -31,6 +31,19 @@ export const state = {
     { feedback: 0.9, swirl: 0.004, glow: 0.06, vig: 0, ca: 0, grain: 0 },
     (() => { try { return JSON.parse(localStorage.getItem('resomance_look') ?? 'null') || {}; } catch (_) { return {}; } })(),
   ),
+  // per-scene look params (feedback/swirl/glow/vig/ca/grain), one slot per scene. Seeded from
+  // the legacy global look so existing users see their look on every scene initially; edited
+  // sliders write back here. state.look is pointed at the current scene's slot (see fixup below).
+  sceneLook: (() => {
+    const base = { feedback: 0.9, swirl: 0.004, glow: 0.06, vig: 0, ca: 0, grain: 0 };
+    let gl = {};
+    try { gl = JSON.parse(localStorage.getItem('resomance_look') ?? 'null') || {}; } catch (_) {}
+    let arr = null;
+    try { arr = JSON.parse(localStorage.getItem('resomance_scene_look') ?? 'null'); } catch (_) {}
+    const out = [];
+    for (let i = 0; i < 6; i++) out.push(Object.assign({}, base, gl, Array.isArray(arr) && arr[i] ? arr[i] : {}));
+    return out;
+  })(),
   router: Object.assign(
     { kick: 'feedback', snare: 'swirl', hat: 'glow', bass: 'none' },
     (() => { try { return JSON.parse(localStorage.getItem('resomance_router') ?? 'null') || {}; } catch (_) { return {}; } })(),
@@ -65,6 +78,7 @@ export const state = {
   mixTrans: null, mixArmedAt: null, autoMixNext: 0,
 };
 state.curStyle = state.scenePalette[state.curMode] || 0;
+state.look = state.sceneLook[state.curMode] || state.sceneLook[0];   // live look refs the current scene's slot; scene switches repoint this
 state.modeA = state.modeB = state.curMode;                 // both layers start on the current scene
 state.autoMixNext = state.autoMixOn ? state.autoMixInterval : 0;   // first auto-mix fires one interval after boot
 
