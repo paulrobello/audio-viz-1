@@ -77,8 +77,8 @@ export function analyze() {
   audio.bands.treble = tr / Math.max(1, n - midEnd);
   audio.bands.level = sum / n;
   audio.bands.centroid = total > 0 ? (wsum / total) / n : 0.5;
-  // NOTE: the spectrum-texture copy (specData[i]=freq[i]) now lives in main.js's frame
-  // loop, right after analyze() — specData/NBINS are render-layer state that stays here.
+  // NOTE: the spectrum-texture copy (specData[i]=freq[i]) now lives in render.js's
+  // renderFrame — specData/NBINS are render-layer state (gl.js), outside analyze().
   freqPrev.set(freq);
 
   // spectral-flux onset detection per band (kick/snare/hat) with adaptive thresholds

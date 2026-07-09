@@ -26,7 +26,7 @@ initControls();
 // persist the queue position (playback owns the data; main.js owns the app lifecycle)
 setInterval(() => pb.saveQueuePos(), 5000);   // checkpoint playback position periodically
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') pb.saveQueuePos(); });
-window.addEventListener('beforeunload', pb.saveQueuePos);
+window.addEventListener('beforeunload', () => pb.saveQueuePos());
 
 // accessibility: respect OS reduced-motion (calm swirl, trails, and beat flashes).
 // state.reducedMotion is the source of truth read by render.js each frame; keep it live.

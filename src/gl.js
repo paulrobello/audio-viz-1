@@ -15,9 +15,20 @@ import fsBright from './shaders/bright.frag';
 import fsBlur from './shaders/blur.frag';
 import { state } from './state.js';
 
+// Surfaces a boot-time GL failure in the #err overlay BEFORE throwing. The throws below
+// fire at module-evaluation time — before main.js registers window.onerror — so without
+// this the overlay never shows and the user sees only a blank page. Self-contained on
+// purpose: no ui.js import (gl.js is the lower layer; #err is already in the DOM when
+// this module evaluates, since the module script sits at the end of <body>).
+function showFatal(msg) {
+  const e = document.getElementById('err');
+  if (e) { e.style.display = 'block'; e.textContent = '⚠ ' + msg; }
+  console.error(msg);
+}
+
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gl'));
 export const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
-if (!gl) throw new Error('WebGL2 is not available. Try Safari or Chrome on Apple Silicon.');
+if (!gl) { showFatal('WebGL2 is not available. Try Safari or Chrome on Apple Silicon.'); throw new Error('no webgl2'); }
 
 // quality presets: DPR cap + raymarch step count (Low / Med / High)
 export const QUAL = [
@@ -84,12 +95,16 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
  * the user compiles a custom shader; copy/bright/blur are immutable after load.
  * @type {{ scene: WebGLProgram, copy: WebGLProgram, bright: WebGLProgram, blur: WebGLProgram }}
  */
-export const programs = {
-  scene: makeProgram(vsSrc, fsScene),
-  copy: makeProgram(vsSrc, fsCopy),
-  bright: makeProgram(vsSrc, fsBright),
-  blur: makeProgram(vsSrc, fsBlur),
-};
+export const programs = (() => {
+  try {
+    return {
+      scene: makeProgram(vsSrc, fsScene),
+      copy: makeProgram(vsSrc, fsCopy),
+      bright: makeProgram(vsSrc, fsBright),
+      blur: makeProgram(vsSrc, fsBlur),
+    };
+  } catch (e) { showFatal(e.message); throw e; }
+})();
 
 /**
  * Allocate an RGBA8 color render target (LINEAR / CLAMP_TO_EDGE) with a matching framebuffer.
