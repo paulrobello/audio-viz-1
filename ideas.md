@@ -32,5 +32,5 @@ UX/perf/integration. Effort is rough.
 - [x] **Reactivity router (map kick/snare/hat to visuals)** — The `u_snare`/`u_hat` uniforms are detected but barely wired; add a small mapping UI so users can route kick/snare/hat/bass to chosen visual params (e.g. snare→swirl, hat→glow, kick→shockwave intensity). (effort: medium)
 
 ## UX, performance & integration
-- [ ] **Named look presets / snapshot slots** — Save and recall the full visual state (scene + palette + look sliders + toggles) into named slots switchable with keys, so polished looks can be queued and recalled during a set. (effort: medium)
+- [x] **Named look presets / snapshot slots** — Save and recall the full visual state (scene + palette + look sliders + toggles) into named slots switchable with keys, so polished looks can be queued and recalled during a set. (effort: medium)
 - [ ] **Mobile / touch polish** — Make the HUD responsive with larger hit targets, add pinch-to-zoom and two-finger orbit gestures alongside the existing pointer-drag camera, so the viz is usable on phones/tablets, not just desktop Chromium. (effort: medium)

@@ -63,6 +63,8 @@
   .seg button.on { background:linear-gradient(180deg,rgba(110,140,255,.45),rgba(60,90,220,.3)); opacity:1; }
   button.tog { opacity:.55; }
   button.tog.on { background:linear-gradient(180deg,rgba(110,140,255,.5),rgba(60,90,220,.35)); border-color:rgba(180,200,255,.6); opacity:1; }
+  button.ps { padding:6px 9px; font-size:11px; opacity:.55; }
+  button.ps.filled { background:linear-gradient(180deg,rgba(110,200,160,.5),rgba(60,150,110,.35)); border-color:rgba(160,220,190,.6); opacity:1; }
 
   #title { font-weight: 700; letter-spacing: .18em; font-size: 13px; color: #aebeff; }
   #sub { color: #8a96c8; font-size: 11px; letter-spacing: .04em; }
@@ -217,6 +219,18 @@
           <label class="chk">hat <select id="rtHat"></select></label>
           <label class="chk">bass <select id="rtBass"></select></label>
         </div>
+        <div class="row" style="gap:5px; flex-wrap:wrap; align-items:center;">
+          <span class="label">presets</span>
+          <label class="chk"><input type="checkbox" id="psSave"> save</label>
+          <button class="ps" data-s="1">1</button>
+          <button class="ps" data-s="2">2</button>
+          <button class="ps" data-s="3">3</button>
+          <button class="ps" data-s="4">4</button>
+          <button class="ps" data-s="5">5</button>
+          <button class="ps" data-s="6">6</button>
+          <button class="ps" data-s="7">7</button>
+          <button class="ps" data-s="8">8</button>
+        </div>
       </div>
     </div>
   </div>
@@ -235,6 +249,7 @@
     <tr><td class="k"><b>R</b></td><td>spectrum ring</td></tr>
     <tr><td class="k"><b>F</b></td><td>fullscreen</td></tr>
     <tr><td class="k"><b>S</b></td><td>screenshot (PNG)</td></tr>
+    <tr><td class="k"><b>Shift+1</b>–<b>8</b></td><td>recall look preset · <b>Ctrl</b>+save</td></tr>
     <tr><td class="k"><b>?</b></td><td>this cheat sheet</td></tr>
   </table>
   <div class="note">Drag the canvas to orbit the Fractal/Tunnel camera (double-click resets to auto). Drop audio files or a folder anywhere to load a full set. The on-screen panel exposes quality, palette, the look controls, and a custom palette editor.</div>
@@ -1181,6 +1196,30 @@ const agcChk=document.getElementById('agc');
 agcChk.checked=autoGainOn;
 agcChk.addEventListener('change', e=>{ autoGainOn=e.target.checked; localStorage.setItem('resomance_autogain', autoGainOn?'1':'0'); });
 // keyboard
+// ---------- named look presets (snapshot slots), recalled with Shift+1..8 ----------
+let presets; try{ presets=JSON.parse(localStorage.getItem('resomance_presets')||'null'); if(!Array.isArray(presets)) presets=[]; }catch(e){ presets=[]; }
+while(presets.length<8) presets.push(null);
+function syncLookSliders(){ for(const k of ['feedback','swirl','glow','vig','ca','grain']){ const el=document.getElementById('lk'+k.charAt(0).toUpperCase()+k.slice(1)); if(el) el.value=look[k]; } }
+function syncRouterUI(){ for(const [id,src] of [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']]){ const s=document.getElementById(id); if(s) s.value=router[src]; } }
+function captureLook(){ return { mode:curMode, style:scenePalette[curMode], look:{...look}, router:{...router}, customPal:JSON.parse(JSON.stringify(customPal)), ring:ringOn, autoHide, autoMix:autoMixOn, beatShift:beatShiftOn, autoGain:autoGainOn }; }
+function applyLook(p){
+  scenePalette[p.mode]=p.style; setMode(p.mode); localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette));
+  Object.assign(look, p.look); localStorage.setItem('resomance_look', JSON.stringify(look)); syncLookSliders();
+  Object.assign(router, p.router); localStorage.setItem('resomance_router', JSON.stringify(router)); syncRouterUI();
+  Object.assign(customPal, p.customPal); localStorage.setItem('resomance_custompal', JSON.stringify(customPal)); syncColorInputs(); syncPalEditor();
+  ringChk.checked=p.ring; ringChk.dispatchEvent(new Event('change'));
+  autohideChk.checked=p.autoHide; autohideChk.dispatchEvent(new Event('change'));
+  autoMixChk.checked=p.autoMix; autoMixChk.dispatchEvent(new Event('change'));
+  beatShiftChk.checked=p.beatShift; beatShiftChk.dispatchEvent(new Event('change'));
+  agcChk.checked=p.autoGain; agcChk.dispatchEvent(new Event('change'));
+}
+function savePreset(i){ presets[i]=captureLook(); localStorage.setItem('resomance_presets', JSON.stringify(presets)); updatePresetUI(); toast('saved preset '+(i+1)); }
+function recallPreset(i){ if(!presets[i]){ toast('preset '+(i+1)+' empty'); return; } applyLook(presets[i]); toast('recalled preset '+(i+1)); }
+function updatePresetUI(){ document.querySelectorAll('.ps').forEach(b=> b.classList.toggle('filled', !!presets[+b.dataset.s-1])); }
+const psSave=document.getElementById('psSave');
+document.querySelectorAll('.ps').forEach(b=> b.addEventListener('click', ()=>{ const i=+b.dataset.s-1; if(psSave.checked) savePreset(i); else recallPreset(i); }));
+updatePresetUI();
+
 window.addEventListener('keydown', e=>{
   if(e.key==='?'){ toggleHelp(); return; }
   if(e.key==='Escape' && helpEl.classList.contains('show')){ toggleHelp(false); return; }
@@ -1192,6 +1231,7 @@ window.addEventListener('keydown', e=>{
     else { poke(); }
     return;
   }
+  if(e.shiftKey && e.code.startsWith('Digit')){ const n=parseInt(e.code.slice(5),10); if(n>=1&&n<=8){ e.preventDefault(); if(e.ctrlKey||e.metaKey) savePreset(n-1); else recallPreset(n-1); return; } }
   if(e.key>='1'&&e.key<='4') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
