@@ -15,7 +15,7 @@ UX/perf/integration. Effort is rough.
 
 ## Audio sources
 - [ ] **Load audio from a URL or stream** — Accept a pasted URL (or internet-radio stream) in addition to local files, wired via `<audio>` + `MediaElementSource` into the analyser so online tracks and live streams drive the viz without a download. (effort: medium)
-- [ ] **Persist the full playlist queue across reloads** — Today only the last single track is cached in IndexedDB; store the whole queue (name + decoded audio) so a dropped folder survives a refresh and resumes at the right position. (effort: medium)
+- [x] **Persist the full playlist queue across reloads** — Today only the last single track is cached in IndexedDB; store the whole queue (name + decoded audio) so a dropped folder survives a refresh and resumes at the right position. (effort: medium)
 
 ## Transport & playback
 - [x] **Shuffle + repeat (one / all) transport modes** — Add the usual shuffle and repeat-one/repeat-all toggles to the playlist so long sets vary or loop as intended instead of always advancing linearly. (effort: small)

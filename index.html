@@ -719,9 +719,9 @@ let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adapt
 let loudEMA=0.1;   // rolling loudness estimate for auto-gain
 let autoGainOn = localStorage.getItem('resomance_autogain') !== '0';   // normalize bands so quiet and loud tracks react at full range
 
-// ---- persist last loaded audio file across reloads (IndexedDB, not localStorage: audio > 5MB quota) ----
-const IDB_DB='resomance', IDB_STORE='audio', IDB_KEY='last';
-let pendingRestore=null;
+// ---- persist the full playlist queue + position across reloads (IndexedDB: audio > 5MB localStorage quota) ----
+const IDB_DB='resomance', IDB_STORE='audio';
+let pendingRestore=null;   // {files, idx, pos} restored on first gesture
 function idbOpen(){
   return new Promise((res)=>{
     const r=indexedDB.open(IDB_DB,1);
@@ -729,28 +729,54 @@ function idbOpen(){
     r.onsuccess=()=>res(r.result); r.onerror=()=>res(null);
   });
 }
-async function idbGetAudio(){
+async function idbGetAudio(){   // legacy single-track cache (fallback for pre-queue installs)
   const db=await idbOpen(); if(!db) return null;
   return new Promise((res)=>{ try{
-    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get(IDB_KEY);
+    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('last');
     req.onsuccess=()=>res(req.result||null); req.onerror=()=>res(null);
   }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
 }
-async function idbSaveAudio(file){
+async function idbSaveQueue(files){
   const db=await idbOpen(); if(!db) return;
   try{ const tx=db.transaction(IDB_STORE,'readwrite');
-    tx.objectStore(IDB_STORE).put({blob:file,name:file.name,type:file.type,size:file.size},IDB_KEY);
+    tx.objectStore(IDB_STORE).put(files.map(f=>({blob:f,name:f.name,type:f.type,size:f.size})),'queue');
     tx.oncomplete=()=>{ try{db.close();}catch(_){} }; tx.onerror=()=>{ try{db.close();}catch(_){} };
   }catch(e){ try{db.close();}catch(_){} }
 }
+async function idbGetQueue(){
+  const db=await idbOpen(); if(!db) return null;
+  return new Promise((res)=>{ try{
+    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('queue');
+    req.onsuccess=()=>{ const a=req.result; res(a&&a.length? a.map(r=>new File([r.blob], r.name||'track', {type:r.type||'audio/*'})) : null); };
+    req.onerror=()=>res(null);
+  }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
+}
+async function idbSavePos(obj){
+  const db=await idbOpen(); if(!db) return;
+  try{ const tx=db.transaction(IDB_STORE,'readwrite');
+    tx.objectStore(IDB_STORE).put(obj,'pos'); tx.oncomplete=()=>{ try{db.close();}catch(_){} }; tx.onerror=()=>{ try{db.close();}catch(_){} };
+  }catch(e){ try{db.close();}catch(_){} }
+}
+async function idbGetPos(){
+  const db=await idbOpen(); if(!db) return null;
+  return new Promise((res)=>{ try{
+    const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('pos');
+    req.onsuccess=()=>res(req.result||null); req.onerror=()=>res(null);
+  }catch(e){ res(null); } finally{ try{db.close();}catch(_){} } });
+}
 function setTrackName(name){ document.getElementById('sub').textContent=name; }
+function currentElapsed(){ if(!curBuffer||!audioCtx) return 0; return Math.max(0,(audioCtx.currentTime-startCtxTime)%trackDur); }
+function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
-idbGetAudio().then(rec=>{
-  if(rec && rec.blob){
-    pendingRestore=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'});
-    setTrackName(pendingRestore.name + '  ·  click to resume');
-  }
-});
+(async function(){
+  const q=await idbGetQueue();
+  if(q&&q.length){ const p=await idbGetPos(); const idx=(p&&p.idx>=0&&p.idx<q.length)?p.idx:0; pendingRestore={files:q, idx, pos:(p&&p.pos)||0}; setTrackName((q[idx].name||'track')+'  ·  click to resume'); return; }
+  const rec=await idbGetAudio();   // legacy single-track cache
+  if(rec&&rec.blob){ const f=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'}); pendingRestore={files:[f], idx:0, pos:0}; setTrackName(f.name+'  ·  click to resume'); }
+})();
+setInterval(()=>saveQueuePos(), 5000);   // checkpoint playback position periodically
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveQueuePos(); });
+window.addEventListener('beforeunload', saveQueuePos);
 
 function ensureCtx(){
   if(!audioCtx){
@@ -775,7 +801,7 @@ function stopSources(){
   isDemo=false;
 }
 
-function playFile(file){
+function playFile(file, offset){
   ensureCtx(); stopSources();
   const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
   const reader = new FileReader();
@@ -783,15 +809,16 @@ function playFile(file){
     audioCtx.decodeAudioData(reader.result.slice(0)).then(buf=>{
       if(tok!==loadToken) return;   // a newer load superseded this one
       decodeFails=0;
-      curBuffer=buf; trackDur=buf.duration; startCtxTime=audioCtx.currentTime;
+      curBuffer=buf; trackDur=buf.duration;
+      const off=Math.max(0,Math.min(offset||0, trackDur*0.999));   // resume offset (clamped) for queue restore / seek
+      startCtxTime=audioCtx.currentTime-off;
       srcNode = audioCtx.createBufferSource();
       srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
       srcNode.connect(analyser);
       srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
-      srcNode.start(); playing=true; isDemo=false; updatePlayBtn();
+      srcNode.start(0, off); playing=true; isDemo=false; updatePlayBtn();
       setTrackName(file.name);
       showSeek(true);
-      idbSaveAudio(file);   // persist for next load
     }).catch(e=>{
       if(tok!==loadToken) return;
       toast('could not read '+file.name);
@@ -803,15 +830,18 @@ function playFile(file){
 }
 // ---------- playlist queue (multi-file / folder) ----------
 function isAudio(f){ return f && (f.type.startsWith('audio') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba|aif[f]?)$/i.test(f.name)); }
-function loadFiles(files){
+function loadFiles(files, idx, offset, skipSave){
   const aud=[...files].filter(isAudio);
   if(!aud.length) return;
-  playlist=aud; playIndex(0);
+  playlist=aud;
+  if(!skipSave) idbSaveQueue(aud);   // persist the full queue so a dropped folder survives a refresh
+  playIndex(idx||0, offset||0);
 }
-function playIndex(i){
+function playIndex(i, offset){
   if(!playlist.length) return;
   curIdx=(i+playlist.length)%playlist.length;
-  playFile(playlist[curIdx]); updateTrackCounter();
+  playFile(playlist[curIdx], offset||0); updateTrackCounter();
+  saveQueuePos(offset||0);   // checkpoint the new track + its resume offset
 }
 function randIdx(){ let r; do{ r=Math.floor(Math.random()*playlist.length); }while(r===curIdx && playlist.length>1); return r; }   // shuffle: a different track than the current one
 function nextTrack(){ if(playlist.length>1) playIndex(shuffleOn ? randIdx() : curIdx+1); }
@@ -1262,7 +1292,7 @@ canvas.addEventListener('dblclick', ()=>{ orbitActive=false; camYaw=camPitch=0; 
 
 // auto-start demo after first gesture (browsers require a user gesture for audio)
 function firstGesture(){
-  if(pendingRestore){ const f=pendingRestore; pendingRestore=null; loadFiles([f]); }
+  if(pendingRestore){ const r=pendingRestore; pendingRestore=null; loadFiles(r.files, r.idx, r.pos, true); }   // restore the queue at the saved position (skipSave: just read it)
   else startDemo();
   window.removeEventListener('pointerdown',firstGesture); window.removeEventListener('keydown',firstGesture);
 }
