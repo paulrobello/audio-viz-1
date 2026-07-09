@@ -207,6 +207,9 @@
         <label class="chk">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
         <label class="chk">swirl <input type="range" id="lkSwirl" min="0" max="0.02" step="0.0005" value="0.004" style="width:120px;"></label>
         <label class="chk">glow <input type="range" id="lkGlow" min="0" max="0.3" step="0.005" value="0.06" style="width:120px;"></label>
+        <label class="chk">vignette <input type="range" id="lkVig" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
+        <label class="chk">chroma <input type="range" id="lkCa" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
+        <label class="chk">grain <input type="range" id="lkGrain" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
         <div class="row" style="gap:7px; flex-wrap:wrap; align-items:center;">
           <span class="label">route</span>
           <label class="chk">kick <select id="rtKick"></select></label>
@@ -530,14 +533,22 @@ uniform sampler2D u_tex;
 uniform sampler2D u_bloom;
 uniform vec2 u_res;
 uniform float u_bloomAmt;
+uniform float u_vig, u_ca, u_grain, u_beat, u_time;   // optional post-FX (vignette / chromatic aberration / film grain), beat-reactive
 vec3 tonemap(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+float hash21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
 void main(){
   vec2 uv = gl_FragCoord.xy/u_res;
-  vec3 c = texture(u_tex, uv).rgb;
+  vec2 d = uv-0.5; float r = length(d);
+  // chromatic aberration: shift R/B outward, scaled by radius and the beat (applied before tonemap)
+  float ca = u_ca*(0.4+0.6*u_beat)*r*0.06;
+  vec2 dir = d/max(r,1e-4);
+  vec3 c = vec3(texture(u_tex, uv+dir*ca).r, texture(u_tex, uv).g, texture(u_tex, uv-dir*ca).b);
   c += texture(u_bloom, uv).rgb * u_bloomAmt;   // add blurred bright-pass before tonemap
   c = tonemap(c*1.15);
   c = pow(c, vec3(0.4545));
-  c *= mix(0.78, 1.0, smoothstep(1.15, 0.35, length(uv-0.5)));
+  c *= mix(0.78, 1.0, smoothstep(1.15, 0.35, r));   // existing subtle base vignette
+  c *= mix(1.0, 0.2, u_vig*(0.7+0.3*u_beat)*smoothstep(0.25, 0.85, r));   // optional beat-reactive vignette
+  c += (hash21(floor(gl_FragCoord.xy) + u_time*60.0)-0.5)*u_grain*0.15;   // animated film grain
   frag = vec4(c, 1.0);
 }
 </script>
@@ -676,7 +687,7 @@ const U = {
   pa:uni(progScene,'u_pa'), pb:uni(progScene,'u_pb'), pc:uni(progScene,'u_pc'), pd:uni(progScene,'u_pd'),
   paletteShift:uni(progScene,'u_paletteShift'),
 };
-const UC = { tex:uni(progCopy,'u_tex'), bloom:uni(progCopy,'u_bloom'), res:uni(progCopy,'u_res'), bloomAmt:uni(progCopy,'u_bloomAmt') };
+const UC = { tex:uni(progCopy,'u_tex'), bloom:uni(progCopy,'u_bloom'), res:uni(progCopy,'u_res'), bloomAmt:uni(progCopy,'u_bloomAmt'), vig:uni(progCopy,'u_vig'), ca:uni(progCopy,'u_ca'), grain:uni(progCopy,'u_grain'), beat:uni(progCopy,'u_beat'), time:uni(progCopy,'u_time') };
 const UB = { tex:uni(progBright,'u_tex'), res:uni(progBright,'u_res'), thresh:uni(progBright,'u_thresh') };
 const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(progBlur,'u_dir') };
 
@@ -893,7 +904,7 @@ let bpm=0, paletteShift=0, prevBeat=0, shockStart=-10; const beatTimes=[];   // 
 let beatPulse=false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
-const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
+const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06, vig:0, ca:0, grain:0};
 let look; try{ look=Object.assign({}, LOOK_DEFAULT, JSON.parse(localStorage.getItem('resomance_look')||'{}')); }catch(e){ look=Object.assign({}, LOOK_DEFAULT); }
 // reactivity router: map onset sources (kick/snare/hat/bass) onto look params (swirl/glow/feedback)
 const ROUTE_DEFAULT={kick:'feedback', snare:'swirl', hat:'glow', bass:'none'};
@@ -1005,6 +1016,7 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
   gl.uniform1i(UC.tex,0); gl.uniform1i(UC.bloom,1); gl.uniform2f(UC.res,W,H);
   gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion?beat*0.2:beat*1.1));
+  gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion?beat*0.2:beat); gl.uniform1f(UC.time, time);
   gl.drawArrays(gl.TRIANGLES,0,3);
   if(pendingShot){ pendingShot=false;   // capture right after the copy pass so the buffer is valid
     canvas.toBlob(b=>{ if(!b) return; const a=document.createElement('a');
@@ -1139,7 +1151,7 @@ const lookToggle=document.getElementById('lookToggle'), lookPanel=document.getEl
 lookToggle.addEventListener('click', ()=> lookPanel.style.display = lookPanel.style.display==='none'?'flex':'none');
 function bindLook(id,key){ const el=document.getElementById(id); el.value=look[key];
   el.addEventListener('input', e=>{ look[key]=parseFloat(e.target.value); localStorage.setItem('resomance_look', JSON.stringify(look)); }); }
-bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow','glow');
+bindLook('lkFeedback','feedback'); bindLook('lkSwirl','swirl'); bindLook('lkGlow','glow'); bindLook('lkVig','vig'); bindLook('lkCa','ca'); bindLook('lkGrain','grain');
 // reactivity router: source -> target selects (kick/snare/hat/bass -> none/swirl/glow/feedback), persisted
 const RT_OPTS=['none','swirl','glow','feedback'];
 [['rtKick','kick'],['rtSnare','snare'],['rtHat','hat'],['rtBass','bass']].forEach(([id,src])=>{
