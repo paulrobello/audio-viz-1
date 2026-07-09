@@ -1,6 +1,6 @@
 // RESOMANCE service worker — cache-first for a fully offline, installable PWA.
 // The app is self-contained (no CDN/font/image deps), so the asset list is tiny.
-const CACHE = 'resomance-v3';   // bump on any index.html change so cache-first serves the new build
+const CACHE = 'resomance-v4';   // bump on any index.html change so cache-first serves the new build
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './og.jpg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

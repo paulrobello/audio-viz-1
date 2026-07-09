@@ -875,6 +875,7 @@ let reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matche
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', e=> reducedMotion=e.matches);
 let t0=performance.now(), lastUI=0, lastFrame=0, fpsEMA=0;
 let bpm=0, paletteShift=0, prevBeat=0, shockStart=-10; const beatTimes=[];   // beat-aware palette shift + shockwave origin
+let beatPulse=false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
 let pendingShot=false;   // screenshot queued by the S hotkey, captured at end of the next frame
 // look controls (persisted): feedback trails, swirl, glow — defaults reproduce the original hardcoded look
 const LOOK_DEFAULT={feedback:0.90, swirl:0.004, glow:0.06};
@@ -902,7 +903,7 @@ let autoHide = localStorage.getItem('resomance_autohide') !== '0';
 const AUTO_MIX_INTERVAL=14, AUTO_MIX_DUR=0.7;
 let modeA=curMode, modeB=curMode, blend=0;
 let autoMixOn = localStorage.getItem('resomance_automix')==='1';
-let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null;
+let autoMixNext = autoMixOn ? AUTO_MIX_INTERVAL : 0, mixTrans=null, mixArmedAt=null;
 function clockSec(){ return (performance.now()-t0)/1000; }
 // orbit camera (drag) state for the raymarch scenes
 let camYaw=0, camPitch=0, orbitActive=false, dragging=false, lastDX=0, lastDY=0;
@@ -911,15 +912,19 @@ function frame(now){
   const dt = lastFrame? now-lastFrame : 0; lastFrame=now;
   if(dt>0){ const inst=1000/dt; fpsEMA = fpsEMA? fpsEMA*0.9+inst*0.1 : inst; }
   analyze(); resize();
+  beatPulse=false;
   // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
-  if(beat>prevBeat+0.5){ beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
+  if(beat>prevBeat+0.5){ beatPulse=true; beatTimes.push(time); shockStart=time; if(beatTimes.length>12) beatTimes.shift();
     if(beatTimes.length>=4){ const iv=[]; for(let i=1;i<beatTimes.length;i++) iv.push(beatTimes[i]-beatTimes[i-1]); iv.sort((a,b)=>a-b); const med=iv[Math.floor(iv.length/2)]; if(med>0.3&&med<2.0) bpm=Math.round(60/med); } }
   prevBeat=beat;
   if(beatShiftOn) paletteShift += dt*0.001*((bpm||100)/60*0.10 + bands.level*0.16);
-  // auto-mix: crossfade to the next scene on a timer
+  // auto-mix: arm at the interval, then fire the crossfade on the next beat (downbeat) so transitions feel musical
   if(autoMixOn){
-    if(!mixTrans && time>=autoMixNext){ const to=(curMode+1)%4; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; }
-    if(mixTrans){ const k=Math.min(1,(time-mixTrans.start)/AUTO_MIX_DUR); blend=k;
+    if(!mixTrans && mixArmedAt===null && time>=autoMixNext) mixArmedAt=time;   // arm: hold for the next beat
+    if(!mixTrans && mixArmedAt!==null){
+      const armWait = (bpm>=40&&bpm<=200) ? Math.min(3.0, 2.2*60/bpm) : 3.0;   // fire on a beat, or fall back after ~2 beats (3s if no BPM)
+      if(beatPulse || time-mixArmedAt>=armWait){ const to=(curMode+1)%4; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; mixArmedAt=null; } }
+    if(mixTrans){ const k=Math.max(0,Math.min(1,(time-mixTrans.start)/AUTO_MIX_DUR)); blend=k;
       if(!mixTrans.palDone && k>=0.5){ mixTrans.palDone=true; applyScenePalette(mixTrans.to); }   // swap to the destination scene's palette at the crossfade midpoint
       if(k>=1){ curMode=mixTrans.to; modeA=modeB=curMode; blend=0; mixTrans=null; autoMixNext=time+AUTO_MIX_INTERVAL; applyModeUI(); } }
   }
@@ -1074,7 +1079,7 @@ applyShufUI(); applyRepUI();
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
 function applyModeUI(){ [...modeSeg.children].forEach(x=>x.classList.toggle('on', parseInt(x.dataset.mode,10)===curMode)); }
-function setMode(m){ curMode=m; modeA=modeB=m; blend=0; mixTrans=null; applyModeUI(); applyScenePalette(m); localStorage.setItem('resomance_scene', String(m)); if(autoMixOn) autoMixNext=clockSec()+AUTO_MIX_INTERVAL; }
+function setMode(m){ curMode=m; modeA=modeB=m; blend=0; mixTrans=null; mixArmedAt=null; applyModeUI(); applyScenePalette(m); localStorage.setItem('resomance_scene', String(m)); if(autoMixOn) autoMixNext=clockSec()+AUTO_MIX_INTERVAL; }
 modeSeg.addEventListener('click', e=>{ const b=e.target.closest('button[data-mode]'); if(b) setMode(parseInt(b.dataset.mode,10)); });
 // palette
 const styleSel=document.getElementById('style');
@@ -1094,7 +1099,7 @@ autohideChk.addEventListener('change', e=>{ autoHide=e.target.checked; localStor
 const autoMixChk=document.getElementById('autoMix');
 autoMixChk.checked=autoMixOn;
 autoMixChk.addEventListener('change', e=>{ autoMixOn=e.target.checked; localStorage.setItem('resomance_automix', autoMixOn?'1':'0');
-  if(autoMixOn){ mixTrans=null; autoMixNext=clockSec()+AUTO_MIX_INTERVAL; } else { modeA=modeB=curMode; blend=0; mixTrans=null; } });
+  if(autoMixOn){ mixTrans=null; mixArmedAt=null; autoMixNext=clockSec()+AUTO_MIX_INTERVAL; } else { modeA=modeB=curMode; blend=0; mixTrans=null; mixArmedAt=null; } });
 // sync UI to persisted look on load
 applyModeUI();
 styleSel.value=String(curStyle); ringChk.checked=ringOn; autohideChk.checked=autoHide; syncPalEditor();
