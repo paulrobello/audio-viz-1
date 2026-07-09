@@ -172,6 +172,7 @@
         <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
         <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
         <label class="chk"><input type="checkbox" id="beatShift" /> beat-shift <span id="bpmVal" class="label">--</span></label>
+        <label class="chk"><input type="checkbox" id="agc" /> auto-gain</label>
       </div>
       <div id="palEdit" style="display:none; margin:6px 0 9px; gap:10px; align-items:center;">
         <span class="label">custom</span>
@@ -682,6 +683,8 @@ let shuffleOn = localStorage.getItem('resomance_shuffle')==='1';
 const bands={bass:0,mid:0,treble:0,level:0,centroid:0};
 let beat=0, snare=0, hat=0;            // spectral-flux onset impulses: kick / snare / hat
 let freqPrev=null, kickFlux=0.0001, snareFlux=0.0001, hatFlux=0.0001;   // adaptive onset thresholds
+let loudEMA=0.1;   // rolling loudness estimate for auto-gain
+let autoGainOn = localStorage.getItem('resomance_autogain') !== '0';   // normalize bands so quiet and loud tracks react at full range
 
 // ---- persist last loaded audio file across reloads (IndexedDB, not localStorage: audio > 5MB quota) ----
 const IDB_DB='resomance', IDB_STORE='audio', IDB_KEY='last';
@@ -862,6 +865,11 @@ function analyze(){
 
   // spectral-flux onset detection per band (kick/snare/hat) with adaptive thresholds
   kickF/=255*Math.max(1,bassEnd); snareF/=255*Math.max(1,midEnd-bassEnd); hatF/=255*Math.max(1,n-midEnd);
+  // auto-gain: normalize bass/mid/treble (and onset flux) against a rolling loudness estimate so quiet and loud tracks react at full range
+  loudEMA = loudEMA*0.99 + bands.level*0.01;
+  const ag = autoGainOn ? Math.max(0.6, Math.min(5, 0.4/(loudEMA+0.03))) : 1;
+  bands.bass=Math.min(1.5, bands.bass*ag); bands.mid=Math.min(1.5, bands.mid*ag); bands.treble=Math.min(1.5, bands.treble*ag); bands.level=Math.min(1.5, bands.level*ag);
+  kickF*=ag; snareF*=ag; hatF*=ag;
   kickFlux=kickFlux*0.94+kickF*0.06; snareFlux=snareFlux*0.94+snareF*0.06; hatFlux=hatFlux*0.94+hatF*0.06;
   if(kickF>kickFlux*1.6 && kickF>0.020) beat=1.0;   // kick drives the existing u_beat
   if(snareF>snareFlux*1.6 && snareF>0.015) snare=1.0;
@@ -1135,6 +1143,10 @@ const beatShiftChk=document.getElementById('beatShift'), bpmVal=document.getElem
 let beatShiftOn = localStorage.getItem('resomance_beatshift')==='1';
 beatShiftChk.checked=beatShiftOn; if(!beatShiftOn) bpmVal.textContent='--';
 beatShiftChk.addEventListener('change', e=>{ beatShiftOn=e.target.checked; localStorage.setItem('resomance_beatshift', beatShiftOn?'1':'0'); if(!beatShiftOn) bpmVal.textContent='--'; });
+// auto-gain toggle: normalize band levels against rolling loudness (default on; ~1x for normal-level tracks)
+const agcChk=document.getElementById('agc');
+agcChk.checked=autoGainOn;
+agcChk.addEventListener('change', e=>{ autoGainOn=e.target.checked; localStorage.setItem('resomance_autogain', autoGainOn?'1':'0'); });
 // keyboard
 window.addEventListener('keydown', e=>{
   if(e.key==='?'){ toggleHelp(); return; }
