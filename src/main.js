@@ -9,9 +9,9 @@ import fsScene from './shaders/scene.frag';
 import fsCopy from './shaders/copy.frag';
 import fsBright from './shaders/bright.frag';
 import fsBlur from './shaders/blur.frag';
-import { state } from './state.js';
-import { audio, ensureCtx, analyze } from './audio.js';
-import { idbGetQueue, idbSaveQueue, idbSavePos, idbGetPos, idbGetAudio } from './storage.js';
+import { state, on } from './state.js';
+import { audio, analyze } from './audio.js';
+import * as pb from './playback.js';
 const errEl = document.getElementById('err');
 function fatal(msg){ errEl.style.display='block'; errEl.textContent = '⚠ '+msg; console.error(msg); }
 window.addEventListener('error', e => fatal((e.message||'error')+(e.filename?('\n'+e.filename+':'+e.lineno):'')));
@@ -116,150 +116,19 @@ const UC = { tex:uni(progCopy,'u_tex'), bloom:uni(progCopy,'u_bloom'), res:uni(p
 const UB = { tex:uni(progBright,'u_tex'), res:uni(progBright,'u_res'), thresh:uni(progBright,'u_thresh') };
 const UBL = { tex:uni(progBlur,'u_tex'), res:uni(progBlur,'u_res'), dir:uni(progBlur,'u_dir') };
 
-// ---------- AUDIO ----------
-let srcNode=null, demoNodes=null, playing=true, isDemo=false;
-let urlAudio=null, urlMes=null;   // <audio> + MediaElementSource for URL / live-stream playback
-let curBuffer=null, startCtxTime=0, trackDur=0, seeking=false;   // file transport / seek state
-let playlist=[], curIdx=-1, loadToken=0, decodeFails=0;   // queue for multi-file / folder loads
-let repeatMode = state.repeatMode;   // 0=off, 1=all (default preserves the looping queue), 2=one
-let shuffleOn = state.shuffleOn;
-
-// ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
-let pendingRestore=null;   // {files, idx, pos} restored on first gesture
-function setTrackName(name){ document.getElementById('sub').textContent=name; }
-function currentElapsed(){ if(!curBuffer||!audio.ctx) return 0; return Math.max(0,(audio.ctx.currentTime-startCtxTime)%trackDur); }
-function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
-// restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
-(async function(){
-  const q=await idbGetQueue();
-  if(q&&q.length){ const p=await idbGetPos(); const idx=(p&&p.idx>=0&&p.idx<q.length)?p.idx:0; pendingRestore={files:q, idx, pos:(p&&p.pos)||0}; setTrackName((q[idx].name||'track')+'  ·  click to resume'); return; }
-  const rec=await idbGetAudio();   // legacy single-track cache
-  if(rec&&rec.blob){ const f=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'}); pendingRestore={files:[f], idx:0, pos:0}; setTrackName(f.name+'  ·  click to resume'); }
-})();
-setInterval(()=>saveQueuePos(), 5000);   // checkpoint playback position periodically
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveQueuePos(); });
-window.addEventListener('beforeunload', saveQueuePos);
-
-function stopSources(){
-  if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
-  if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
-  if(urlAudio){ try{urlAudio.pause();}catch(e){} try{urlMes.disconnect();}catch(e){} urlAudio=null; urlMes=null; }
-  isDemo=false;
-}
-
-function playFile(file, offset){
-  ensureCtx(); stopSources();
-  const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
-  const reader = new FileReader();
-  reader.onload = () => {
-    audio.ctx.decodeAudioData(reader.result.slice(0)).then(buf=>{
-      if(tok!==loadToken) return;   // a newer load superseded this one
-      decodeFails=0;
-      curBuffer=buf; trackDur=buf.duration;
-      const off=Math.max(0,Math.min(offset||0, trackDur*0.999));   // resume offset (clamped) for queue restore / seek
-      startCtxTime=audio.ctx.currentTime-off;
-      srcNode = audio.ctx.createBufferSource();
-      srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
-      srcNode.connect(audio.analyser);
-      srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
-      srcNode.start(0, off); playing=true; isDemo=false; updatePlayBtn();
-      setTrackName(file.name);
-      showSeek(true);
-    }).catch(e=>{
-      if(tok!==loadToken) return;
-      toast('could not read '+file.name);
-      if(playlist.length>1 && ++decodeFails<playlist.length) nextTrack();   // skip a bad file within a queue (bounded)
-      else fatal('Could not decode audio: '+e.message);
-    });
-  };
-  reader.readAsArrayBuffer(file);
-}
-// ---------- URL / stream source (<audio> + MediaElementSource into the analyser) ----------
-function playUrl(url){
-  ensureCtx(); stopSources();
-  try{
-    const audioEl=new Audio();
-    audioEl.crossOrigin='anonymous';   // required so the analyser can read the stream (CORS-enabled sources only)
-    audioEl.src=url; audioEl.loop=true;   // loop finite URLs; live streams ignore loop
-    urlMes=audio.ctx.createMediaElementSource(audioEl); urlMes.connect(audio.analyser);
-    urlAudio=audioEl; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
-    audioEl.play().then(()=>{ playing=true; isDemo=false; updatePlayBtn(); setTrackName(url.length>52?url.slice(0,52)+'…':url); showSeek(false); updateTrackCounter(); })
-      .catch(()=>{ toast('could not play URL'); stopSources(); });
-  }catch(e){ toast('could not play URL'); }
-}
-// ---------- playlist queue (multi-file / folder) ----------
-function isAudio(f){ return f && (f.type.startsWith('audio') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba|aif[f]?)$/i.test(f.name)); }
-function loadFiles(files, idx, offset, skipSave){
-  const aud=[...files].filter(isAudio);
-  if(!aud.length) return;
-  playlist=aud;
-  if(!skipSave) idbSaveQueue(aud);   // persist the full queue so a dropped folder survives a refresh
-  playIndex(idx||0, offset||0);
-}
-function playIndex(i, offset){
-  if(!playlist.length) return;
-  curIdx=(i+playlist.length)%playlist.length;
-  playFile(playlist[curIdx], offset||0); updateTrackCounter();
-  saveQueuePos(offset||0);   // checkpoint the new track + its resume offset
-}
-function randIdx(){ let r; do{ r=Math.floor(Math.random()*playlist.length); }while(r===curIdx && playlist.length>1); return r; }   // shuffle: a different track than the current one
-function nextTrack(){ if(playlist.length>1) playIndex(shuffleOn ? randIdx() : curIdx+1); }
-function prevTrack(){ if(playlist.length>1) playIndex(curIdx-1); }
-// natural end of a queue track: repeat-one loops via srcNode.loop, repeat-all advances, repeat-off stops after the last linear track
-function onTrackEnd(){ if(playlist.length<=1) return;
-  if(repeatMode===0 && !shuffleOn && curIdx===playlist.length-1){ stopSources(); playing=false; updatePlayBtn(); }
-  else nextTrack(); }
-// folder-drop traversal (webkitGetAsEntry) — flatten a directory tree into audio Files
-function readDirEntries(dir){ return new Promise(res=>{ const rd=dir.createReader(); const all=[]; (function read(){ rd.readEntries(ents=>{ if(!ents.length) return res(all); all.push(...ents); read(); }, ()=>res(all)); })(); }); }
-function entryToFile(entry){ return new Promise(res=>entry.file(f=>res(f),()=>res(null))); }
-async function collectEntries(entries){ const out=[];
-  async function walk(en){ if(en.isFile){ const f=await entryToFile(en); if(f) out.push(f); } else if(en.isDirectory){ for(const k of await readDirEntries(en)) await walk(k); } }
-  for(const en of entries) await walk(en);
-  return out.filter(isAudio); }
-
-function startDemo(){
-  ensureCtx(); stopSources();
-  const mix = audio.ctx.createGain(); mix.gain.value = 0.0;
-  mix.connect(audio.analyser);
-  const oscs=[]; const roots=[55,82.4,110,164.8];
-  roots.forEach((f,i)=>{
-    const o=audio.ctx.createOscillator(); o.type=i%2?'sawtooth':'triangle';
-    o.frequency.value=f; o.detune.value=(i-1.5)*8;
-    const g=audio.ctx.createGain(); g.gain.value=0.18/(i+1);
-    o.connect(g); g.connect(mix); o.start(); oscs.push(o);
-  });
-  const nb=audio.ctx.createBuffer(1,audio.ctx.sampleRate*2,audio.ctx.sampleRate);
-  const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1)*0.5;
-  const noise=audio.ctx.createBufferSource(); noise.buffer=nb; noise.loop=true;
-  const hp=audio.ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
-  const ng=audio.ctx.createGain(); ng.gain.value=0.05;
-  noise.connect(hp); hp.connect(ng); ng.connect(mix); noise.start();
-  const lfo=audio.ctx.createOscillator(); lfo.frequency.value=2.0;
-  const lfoG=audio.ctx.createGain(); lfoG.gain.value=0.5;
-  const baseG=audio.ctx.createConstantSource(); baseG.offset.value=0.5;
-  baseG.connect(mix.gain); lfo.connect(lfoG); lfoG.connect(mix.gain); lfo.start(); baseG.start();
-  const arp=audio.ctx.createOscillator(); arp.type='square'; arp.frequency.value=440;
-  const arpG=audio.ctx.createGain(); arpG.gain.value=0.0;
-  arp.connect(arpG); arpG.connect(mix); arp.start();
-  const scale=[220,277,330,440,554,659,880]; let step=0;
-  const arpTimer=setInterval(()=>{
-    if(!audio.ctx) return;
-    arp.frequency.setTargetAtTime(scale[step%scale.length], audio.ctx.currentTime, 0.01);
-    arpG.gain.setTargetAtTime(0.06, audio.ctx.currentTime, 0.01);
-    arpG.gain.setTargetAtTime(0.0, audio.ctx.currentTime+0.12, 0.05);
-    step++;
-  },250);
-  const sweep=audio.ctx.createBiquadFilter(); sweep.type='lowpass'; sweep.frequency.value=800;
-  mix.disconnect(); mix.connect(sweep); sweep.connect(audio.analyser);
-  const sweepLfo=audio.ctx.createOscillator(); sweepLfo.frequency.value=0.08;
-  const sweepG=audio.ctx.createGain(); sweepG.gain.value=900;
-  sweepLfo.connect(sweepG); sweepG.connect(sweep.frequency); sweepLfo.start();
-  mix.gain.setTargetAtTime(0.9, audio.ctx.currentTime, 0.5);
-  const timerKiller={ stop(){ clearInterval(arpTimer); }, disconnect(){} };
-  demoNodes=[...oscs, noise, lfo, baseG, arp, sweepLfo, timerKiller];
-  isDemo=true; playing=true; updatePlayBtn();
-  curBuffer=null; showSeek(false);   // demo has no finite timeline
-}
+// ---------- transport bus: playback.js → view (UI updates that used to be inline) ----------
+on('transport', (e) => {
+  if (e.type === 'playState') updatePlayBtn();
+  else if (e.type === 'trackName') document.getElementById('sub').textContent = e.name;
+  else if (e.type === 'seekVisibility') showSeek(e.on);
+  else if (e.type === 'trackCount') updateTrackCounter();
+  else if (e.type === 'toast') toast(e.msg);
+  else if (e.type === 'fatal') fatal(e.msg);
+});
+// persist the queue position (playback owns the data; main.js owns the app lifecycle)
+setInterval(() => pb.saveQueuePos(), 5000);   // checkpoint playback position periodically
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') pb.saveQueuePos(); });
+window.addEventListener('beforeunload', pb.saveQueuePos);
 
 // ---------- RENDER ----------
 // accessibility: respect OS reduced-motion (calm swirl, trails, and beat flashes)
@@ -427,52 +296,38 @@ function hideUI(){ ui.classList.remove('show'); hintEl.classList.remove('show');
 function poke(){ showUI(); clearTimeout(idleTimer); if(autoHide) idleTimer=setTimeout(hideUI, IDLE_MS); }
 ['pointermove','pointerdown','wheel','touchstart'].forEach(ev=> window.addEventListener(ev, poke, {passive:true}));
 poke();
-document.getElementById('file').addEventListener('change', e=>{ if(e.target.files.length) loadFiles(e.target.files); });
-document.getElementById('demo').addEventListener('click', startDemo);
-document.getElementById('urlLoad').addEventListener('click', ()=>{ const u=document.getElementById('urlIn').value.trim(); if(u) playUrl(u); });
+document.getElementById('file').addEventListener('change', e=>{ if(e.target.files.length) pb.loadFiles(e.target.files); });
+document.getElementById('demo').addEventListener('click', pb.startDemo);
+document.getElementById('urlLoad').addEventListener('click', ()=>{ const u=document.getElementById('urlIn').value.trim(); if(u) pb.playUrl(u); });
 document.getElementById('urlIn').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('urlLoad').click(); } });
 const playBtn=document.getElementById('play');
-function updatePlayBtn(){ playBtn.textContent = playing?'⏸ Pause':'▶ Play'; }
-playBtn.addEventListener('click', ()=>{
-  if(!audio.ctx){ startDemo(); return; }
-  if(playing){ if(urlAudio) urlAudio.pause(); else audio.ctx.suspend(); playing=false; }
-  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audio.ctx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
-  updatePlayBtn();
-});
+function updatePlayBtn(){ playBtn.textContent = pb.isPlaying()?'⏸ Pause':'▶ Play'; }
+playBtn.addEventListener('click', () => pb.togglePlay());
 // ---------- transport: seek bar (file playback only) ----------
 const seekRow=document.getElementById('seekRow'), seekEl=document.getElementById('seek'),
       curTimeEl=document.getElementById('curTime'), totTimeEl=document.getElementById('totTime');
+let seeking=false;
 function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
   return (h>0? h+':'+String(m).padStart(2,'0') : String(m))+':'+String(sec).padStart(2,'0'); }
-function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(trackDur); }
-// jump to frac (0..1) of the buffer by recreating the source at that offset
-function seekTo(frac){
-  if(!curBuffer||!audio.ctx) return;
-  const off=Math.max(0,Math.min(frac,0.999))*trackDur;
-  try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
-  srcNode=audio.ctx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || repeatMode===2; srcNode.connect(audio.analyser);
-  srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };
-  startCtxTime=audio.ctx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
-  srcNode.start(0, off);
-}
+function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(pb.getTrackDur()); }
 function updateSeek(){
-  if(!curBuffer||!audio.ctx||seeking) return;
-  const el=(audio.ctx.currentTime-startCtxTime)%trackDur;
-  seekEl.value=String(Math.round(el/trackDur*1000));
+  if(!pb.hasBuffer()||!audio.ctx||seeking) return;
+  const el=pb.currentElapsed(), dur=pb.getTrackDur();
+  seekEl.value=String(Math.round(el/dur*1000));
   curTimeEl.textContent=fmtTime(el);
 }
-seekEl.addEventListener('input', ()=>{ seeking=true; if(curBuffer) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*trackDur); });
-seekEl.addEventListener('change', ()=>{ if(curBuffer) seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
+seekEl.addEventListener('input', ()=>{ seeking=true; if(pb.hasBuffer()) curTimeEl.textContent=fmtTime(parseFloat(seekEl.value)/1000*pb.getTrackDur()); });
+seekEl.addEventListener('change', ()=>{ if(pb.hasBuffer()) pb.seekTo(parseFloat(seekEl.value)/1000); seeking=false; });
 // prev / next + track counter
 const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next'), trackCountEl=document.getElementById('trackCount'),
       shufBtn=document.getElementById('shuf'), repBtn=document.getElementById('rep');
-prevBtn.addEventListener('click', prevTrack);
-nextBtn.addEventListener('click', nextTrack);
-function updateTrackCounter(){ const multi=playlist.length>1; trackCountEl.textContent = multi ? (curIdx+1)+' / '+playlist.length : ''; prevBtn.disabled=nextBtn.disabled=shufBtn.disabled=repBtn.disabled=!multi; }
-function applyShufUI(){ shufBtn.classList.toggle('on', shuffleOn); }
-function applyRepUI(){ repBtn.classList.toggle('on', repeatMode!==0); repBtn.textContent = repeatMode===2 ? '↻1' : '↻'; }
-shufBtn.addEventListener('click', ()=>{ shuffleOn=!shuffleOn; localStorage.setItem('resomance_shuffle', shuffleOn?'1':'0'); applyShufUI(); toast(shuffleOn?'shuffle on':'shuffle off'); });
-repBtn.addEventListener('click', ()=>{ repeatMode=(repeatMode+1)%3; if(srcNode) srcNode.loop = playlist.length<=1 || repeatMode===2; localStorage.setItem('resomance_repeat', String(repeatMode)); applyRepUI(); toast(['repeat off','repeat all','repeat one'][repeatMode]); });
+prevBtn.addEventListener('click', pb.prevTrack);
+nextBtn.addEventListener('click', pb.nextTrack);
+function updateTrackCounter(){ const pl=pb.getPlaylist(), ci=pb.getCurIdx(); const multi=pl.length>1; trackCountEl.textContent = multi ? (ci+1)+' / '+pl.length : ''; prevBtn.disabled=nextBtn.disabled=shufBtn.disabled=repBtn.disabled=!multi; }
+function applyShufUI(){ shufBtn.classList.toggle('on', state.shuffleOn); }
+function applyRepUI(){ repBtn.classList.toggle('on', state.repeatMode!==0); repBtn.textContent = state.repeatMode===2 ? '↻1' : '↻'; }
+shufBtn.addEventListener('click', ()=>{ state.shuffleOn=!state.shuffleOn; localStorage.setItem('resomance_shuffle', state.shuffleOn?'1':'0'); applyShufUI(); toast(state.shuffleOn?'shuffle on':'shuffle off'); });
+repBtn.addEventListener('click', ()=>{ state.repeatMode=(state.repeatMode+1)%3; pb.applyLoop(); localStorage.setItem('resomance_repeat', String(state.repeatMode)); applyRepUI(); toast(['repeat off','repeat all','repeat one'][state.repeatMode]); });
 applyShufUI(); applyRepUI();
 // scene segmented buttons
 const modeSeg=document.getElementById('modeSeg');
@@ -606,7 +461,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
   if(e.key==='f'||e.key==='F') toggleFullscreen();
-  if((e.key==='ArrowRight'||e.key==='ArrowLeft') && document.activeElement!==seekEl){ e.preventDefault(); e.key==='ArrowRight'?nextTrack():prevTrack(); }
+  if((e.key==='ArrowRight'||e.key==='ArrowLeft') && document.activeElement!==seekEl){ e.preventDefault(); e.key==='ArrowRight'?pb.nextTrack():pb.prevTrack(); }
   poke();   // any other key counts as activity
 });
 
@@ -618,9 +473,9 @@ window.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('
   const dt=e.dataTransfer;
   if(dt.items && dt.items.length && typeof dt.items[0].webkitGetAsEntry==='function'){
     const entries=[]; for(const it of dt.items){ const en=it.webkitGetAsEntry(); if(en) entries.push(en); }
-    if(entries.length){ collectEntries(entries).then(loadFiles); return; }
+    if(entries.length){ pb.collectEntries(entries).then(pb.loadFiles); return; }
   }
-  if(dt.files && dt.files.length) loadFiles(dt.files);
+  if(dt.files && dt.files.length) pb.loadFiles(dt.files);
 });
 // orbit camera: drag on the canvas to look around the Fractal/Tunnel field (double-click resets to auto)
 // multi-pointer camera: one finger orbits, two fingers orbit + pinch-zoom
@@ -643,8 +498,7 @@ canvas.addEventListener('dblclick', ()=>{ orbitActive=false; camYaw=camPitch=0; 
 
 // auto-start demo after first gesture (browsers require a user gesture for audio)
 function firstGesture(){
-  if(pendingRestore){ const r=pendingRestore; pendingRestore=null; loadFiles(r.files, r.idx, r.pos, true); }   // restore the queue at the saved position (skipSave: just read it)
-  else startDemo();
+  pb.onFirstGesture();   // restore the queue at the saved position, else start the demo
   window.removeEventListener('pointerdown',firstGesture); window.removeEventListener('keydown',firstGesture);
 }
 window.addEventListener('pointerdown', firstGesture);

@@ -1,0 +1,190 @@
+// Playback engine: audio sources (file / URL / demo), playlist queue, transport
+// (play / pause / skip / seek), shuffle / repeat, and folder-drop traversal. Lifted
+// verbatim from the former monolith; the demo synth graph, decode/seek/queue/shuffle/
+// repeat logic, CORS handling (audioEl.crossOrigin='anonymous'), and srcNode.loop /
+// onended semantics are unchanged. The view (still in main.js until Task 8) is notified
+// via the state bus ('transport') instead of direct UI calls.
+import { audio, ensureCtx } from './audio.js';
+import { idbGetQueue, idbSaveQueue, idbSavePos, idbGetPos, idbGetAudio } from './storage.js';
+import { state, emit } from './state.js';
+
+let srcNode = null, demoNodes = null, playing = true, isDemo = false;
+let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
+let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek state
+let playlist = [], curIdx = -1, loadToken = 0, decodeFails = 0;   // queue for multi-file / folder loads
+let pendingRestore = null;   // {files, idx, pos} restored on first gesture
+
+// ---- bus → view (replaces former direct calls to toast/fatal/setTrackName/updatePlayBtn/showSeek/updateTrackCounter) ----
+function toast(msg){ emit('transport', { type: 'toast', msg }); }
+function fatal(msg){ emit('transport', { type: 'fatal', msg }); }
+function setTrackName(name){ emit('transport', { type: 'trackName', name }); }
+function playState(){ emit('transport', { type: 'playState' }); }
+function seekVis(on){ emit('transport', { type: 'seekVisibility', on }); }
+function trackCount(){ emit('transport', { type: 'trackCount' }); }
+
+export function currentElapsed(){ if(!curBuffer||!audio.ctx) return 0; return Math.max(0,(audio.ctx.currentTime-startCtxTime)%trackDur); }
+export function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
+
+// ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
+// restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
+(async function(){
+  const q=await idbGetQueue();
+  if(q&&q.length){ const p=await idbGetPos(); const idx=(p&&p.idx>=0&&p.idx<q.length)?p.idx:0; pendingRestore={files:q, idx, pos:(p&&p.pos)||0}; setTrackName((q[idx].name||'track')+'  ·  click to resume'); return; }
+  const rec=await idbGetAudio();   // legacy single-track cache
+  if(rec&&rec.blob){ const f=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'}); pendingRestore={files:[f], idx:0, pos:0}; setTrackName(f.name+'  ·  click to resume'); }
+})();
+
+export function stopSources(){
+  if(srcNode){ srcNode.onended=null; try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null; }
+  if(demoNodes){ demoNodes.forEach(n=>{ try{n.stop&&n.stop();}catch(e){} try{n.disconnect();}catch(e){} }); demoNodes=null; }
+  if(urlAudio){ try{urlAudio.pause();}catch(e){} try{urlMes.disconnect();}catch(e){} urlAudio=null; urlMes=null; }
+  isDemo=false;
+}
+
+function playFile(file, offset){
+  ensureCtx(); stopSources();
+  const tok=++loadToken;   // guard against out-of-order decode completion during rapid skips
+  const reader = new FileReader();
+  reader.onload = () => {
+    audio.ctx.decodeAudioData((/** @type {ArrayBuffer} */ (reader.result)).slice(0)).then(buf=>{
+      if(tok!==loadToken) return;   // a newer load superseded this one
+      decodeFails=0;
+      curBuffer=buf; trackDur=buf.duration;
+      const off=Math.max(0,Math.min(offset||0, trackDur*0.999));   // resume offset (clamped) for queue restore / seek
+      startCtxTime=audio.ctx.currentTime-off;
+      srcNode = audio.ctx.createBufferSource();
+      srcNode.buffer = buf; srcNode.loop = playlist.length<=1 || state.repeatMode===2;   // single file or repeat-one loops the buffer; a queue auto-advances
+      srcNode.connect(audio.analyser);
+      srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };   // natural end only — manual stops null the handler first (loop=true suppresses it)
+      srcNode.start(0, off); playing=true; isDemo=false; playState();
+      setTrackName(file.name);
+      seekVis(true);
+    }).catch(e=>{
+      if(tok!==loadToken) return;
+      toast('could not read '+file.name);
+      if(playlist.length>1 && ++decodeFails<playlist.length) nextTrack();   // skip a bad file within a queue (bounded)
+      else fatal('Could not decode audio: '+e.message);
+    });
+  };
+  reader.readAsArrayBuffer(file);
+}
+// ---------- URL / stream source (<audio> + MediaElementSource into the analyser) ----------
+export function playUrl(url){
+  ensureCtx(); stopSources();
+  try{
+    const audioEl=new Audio();
+    audioEl.crossOrigin='anonymous';   // required so the analyser can read the stream (CORS-enabled sources only)
+    audioEl.src=url; audioEl.loop=true;   // loop finite URLs; live streams ignore loop
+    urlMes=audio.ctx.createMediaElementSource(audioEl); urlMes.connect(audio.analyser);
+    urlAudio=audioEl; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
+    audioEl.play().then(()=>{ playing=true; isDemo=false; playState(); setTrackName(url.length>52?url.slice(0,52)+'…':url); seekVis(false); trackCount(); })
+      .catch(()=>{ toast('could not play URL'); stopSources(); });
+  }catch(e){ toast('could not play URL'); }
+}
+// ---------- playlist queue (multi-file / folder) ----------
+export function isAudio(f){ return f && (f.type.startsWith('audio') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba|aif[f]?)$/i.test(f.name)); }
+export function loadFiles(files, idx, offset, skipSave){
+  const aud=[...files].filter(isAudio);
+  if(!aud.length) return;
+  playlist=aud;
+  if(!skipSave) idbSaveQueue(aud);   // persist the full queue so a dropped folder survives a refresh
+  playIndex(idx||0, offset||0);
+}
+export function playIndex(i, offset){
+  if(!playlist.length) return;
+  curIdx=(i+playlist.length)%playlist.length;
+  playFile(playlist[curIdx], offset||0); trackCount();
+  saveQueuePos(offset||0);   // checkpoint the new track + its resume offset
+}
+function randIdx(){ let r; do{ r=Math.floor(Math.random()*playlist.length); }while(r===curIdx && playlist.length>1); return r; }   // shuffle: a different track than the current one
+export function nextTrack(){ if(playlist.length>1) playIndex(state.shuffleOn ? randIdx() : curIdx+1); }
+export function prevTrack(){ if(playlist.length>1) playIndex(curIdx-1); }
+// natural end of a queue track: repeat-one loops via srcNode.loop, repeat-all advances, repeat-off stops after the last linear track
+export function onTrackEnd(){ if(playlist.length<=1) return;
+  if(state.repeatMode===0 && !state.shuffleOn && curIdx===playlist.length-1){ stopSources(); playing=false; playState(); }
+  else nextTrack(); }
+// folder-drop traversal (webkitGetAsEntry) — flatten a directory tree into audio Files
+function readDirEntries(dir){ return new Promise(res=>{ const rd=dir.createReader(); const all=[]; (function read(){ rd.readEntries(ents=>{ if(!ents.length) return res(all); all.push(...ents); read(); }, ()=>res(all)); })(); }); }
+function entryToFile(entry){ return new Promise(res=>entry.file(f=>res(f),()=>res(null))); }
+export async function collectEntries(entries){ const out=[];
+  async function walk(en){ if(en.isFile){ const f=await entryToFile(en); if(f) out.push(f); } else if(en.isDirectory){ for(const k of await readDirEntries(en)) await walk(k); } }
+  for(const en of entries) await walk(en);
+  return out.filter(isAudio); }
+
+export function startDemo(){
+  ensureCtx(); stopSources();
+  const mix = audio.ctx.createGain(); mix.gain.value = 0.0;
+  mix.connect(audio.analyser);
+  const oscs=[]; const roots=[55,82.4,110,164.8];
+  roots.forEach((f,i)=>{
+    const o=audio.ctx.createOscillator(); o.type=i%2?'sawtooth':'triangle';
+    o.frequency.value=f; o.detune.value=(i-1.5)*8;
+    const g=audio.ctx.createGain(); g.gain.value=0.18/(i+1);
+    o.connect(g); g.connect(mix); o.start(); oscs.push(o);
+  });
+  const nb=audio.ctx.createBuffer(1,audio.ctx.sampleRate*2,audio.ctx.sampleRate);
+  const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1)*0.5;
+  const noise=audio.ctx.createBufferSource(); noise.buffer=nb; noise.loop=true;
+  const hp=audio.ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
+  const ng=audio.ctx.createGain(); ng.gain.value=0.05;
+  noise.connect(hp); hp.connect(ng); ng.connect(mix); noise.start();
+  const lfo=audio.ctx.createOscillator(); lfo.frequency.value=2.0;
+  const lfoG=audio.ctx.createGain(); lfoG.gain.value=0.5;
+  const baseG=audio.ctx.createConstantSource(); baseG.offset.value=0.5;
+  baseG.connect(mix.gain); lfo.connect(lfoG); lfoG.connect(mix.gain); lfo.start(); baseG.start();
+  const arp=audio.ctx.createOscillator(); arp.type='square'; arp.frequency.value=440;
+  const arpG=audio.ctx.createGain(); arpG.gain.value=0.0;
+  arp.connect(arpG); arpG.connect(mix); arp.start();
+  const scale=[220,277,330,440,554,659,880]; let step=0;
+  const arpTimer=setInterval(()=>{
+    if(!audio.ctx) return;
+    arp.frequency.setTargetAtTime(scale[step%scale.length], audio.ctx.currentTime, 0.01);
+    arpG.gain.setTargetAtTime(0.06, audio.ctx.currentTime, 0.01);
+    arpG.gain.setTargetAtTime(0.0, audio.ctx.currentTime+0.12, 0.05);
+    step++;
+  },250);
+  const sweep=audio.ctx.createBiquadFilter(); sweep.type='lowpass'; sweep.frequency.value=800;
+  mix.disconnect(); mix.connect(sweep); sweep.connect(audio.analyser);
+  const sweepLfo=audio.ctx.createOscillator(); sweepLfo.frequency.value=0.08;
+  const sweepG=audio.ctx.createGain(); sweepG.gain.value=900;
+  sweepLfo.connect(sweepG); sweepG.connect(sweep.frequency); sweepLfo.start();
+  mix.gain.setTargetAtTime(0.9, audio.ctx.currentTime, 0.5);
+  const timerKiller={ stop(){ clearInterval(arpTimer); }, disconnect(){} };
+  demoNodes=[...oscs, noise, lfo, baseG, arp, sweepLfo, timerKiller];
+  isDemo=true; playing=true; playState();
+  curBuffer=null; seekVis(false);   // demo has no finite timeline
+}
+
+export function seekTo(frac){
+  if(!curBuffer||!audio.ctx) return;
+  const off=Math.max(0,Math.min(frac,0.999))*trackDur;
+  try{ if(srcNode){ srcNode.onended=null; srcNode.stop(); srcNode.disconnect(); } }catch(e){}
+  srcNode=audio.ctx.createBufferSource(); srcNode.buffer=curBuffer; srcNode.loop = playlist.length<=1 || state.repeatMode===2; srcNode.connect(audio.analyser);
+  srcNode.onended = ()=>{ if(playlist.length>1) onTrackEnd(); };
+  startCtxTime=audio.ctx.currentTime-off;   // currentTime is frozen while suspended, so this works paused too
+  srcNode.start(0, off);
+}
+
+// play-button click logic (lifted verbatim from the former inline handler)
+export function togglePlay(){
+  if(!audio.ctx){ startDemo(); return; }
+  if(playing){ if(urlAudio) urlAudio.pause(); else audio.ctx.suspend(); playing=false; }
+  else { if(urlAudio) urlAudio.play(); else if(!srcNode && playlist.length) playIndex(curIdx); else audio.ctx.resume(); playing=true; }   // URL: toggle the element; else restart the track if playback stopped at queue end (repeat off)
+  playState();
+}
+
+// first user gesture: resume the saved queue at its position, else start the demo (browsers require a gesture for audio)
+export function onFirstGesture(){
+  if(pendingRestore){ const r=pendingRestore; pendingRestore=null; loadFiles(r.files, r.idx, r.pos, true); }   // restore the queue at the saved position (skipSave: just read it)
+  else startDemo();
+}
+
+// repeat button: apply the new repeatMode to the currently-playing buffer source's loop flag
+export function applyLoop(){ if(srcNode) srcNode.loop = playlist.length<=1 || state.repeatMode===2; }
+
+export function isPlaying(){ return playing; }
+export function isDemoSource(){ return isDemo; }
+export function getPlaylist(){ return playlist; }
+export function getCurIdx(){ return curIdx; }
+export function getTrackDur(){ return trackDur; }
+export function hasBuffer(){ return curBuffer!=null; }   // lets main.js's seek guard preserve the former !curBuffer check verbatim
