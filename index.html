@@ -175,6 +175,7 @@
           <button data-mode="1">Tunnel</button>
           <button data-mode="2">Plasma</button>
           <button data-mode="3">Vortex</button>
+          <button data-mode="4">Terrain</button>
         </div>
         <label class="chk"><input type="checkbox" id="autoMix" /> auto-mix</label>
       </div>
@@ -253,14 +254,14 @@
   <div></div>
 </div>
 
-<div id="hint">press <b>H</b> hide UI · <b>drag</b> orbit · drop audio/folder anywhere · <b>1-4</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
+<div id="hint">press <b>H</b> hide UI · <b>drag</b> orbit · drop audio/folder anywhere · <b>1-5</b> scene · <b>space</b> play/pause · <b>←/→</b> track · <b>R</b> ring · <b>F</b> fullscreen · <b>S</b> screenshot · <b>?</b> help</div>
 <div id="toast"></div>
 <div id="help"><div class="box">
   <h2>R E S O M A N C E — shortcuts</h2>
   <table>
     <tr><td class="k"><b>Space</b></td><td>play / pause</td></tr>
     <tr><td class="k"><b>H</b></td><td>toggle HUD</td></tr>
-    <tr><td class="k"><b>1</b>–<b>4</b></td><td>scene: Fractal / Tunnel / Plasma / Vortex</td></tr>
+    <tr><td class="k"><b>1</b>–<b>5</b></td><td>scene: Fractal / Tunnel / Plasma / Vortex / Terrain</td></tr>
     <tr><td class="k"><b>←</b>/<b>→</b></td><td>previous / next track</td></tr>
     <tr><td class="k"><b>R</b></td><td>spectrum ring</td></tr>
     <tr><td class="k"><b>F</b></td><td>fullscreen</td></tr>
@@ -511,11 +512,39 @@ vec3 sceneVortex(vec2 uv){
   return c * (0.7 + u_level*0.8);
 }
 
+// ---------- scene 4: audio-reactive scrolling frequency-bar terrain (raymarched heightmap) ----------
+float terrH(vec2 p){ return fbm(p*0.45)*0.35 + texture(u_spec, vec2(fract(p.x*0.08), 0.5)).r*0.9 + u_bass*0.35; }
+vec3 sceneTerrain(vec2 uv){
+  vec3 ro = vec3(0.0, 1.3, u_time*2.0);                 // fly forward over the terrain
+  vec3 rd = normalize(vec3(uv*1.1, 1.0) + vec3(0.0, -0.35, 0.0));   // look down at it
+  float t=0.0; bool hit=false; vec3 p=vec3(0.0);
+  for(int i=0;i<120;i++){
+    if(i>=u_rmSteps) break;
+    p = ro + rd*t;
+    float h = terrH(p.xz);
+    if(p.y < h){ hit=true; break; }
+    t += max(0.04, (p.y - h)*0.8);
+    if(t>24.0) break;
+  }
+  vec3 col = palette(u_centroid + u_time*0.04)*0.04;   // dark sky
+  if(hit){
+    vec2 e=vec2(0.06,0.0);
+    vec3 n = normalize(vec3(terrH(p.xz-e.xy)-terrH(p.xz+e.xy), 2.0*e.x, terrH(p.xz-e.yx)-terrH(p.xz+e.yx)));
+    float dif = clamp(dot(n, normalize(vec3(0.3,0.8,-0.4))),0.0,1.0);
+    float spec = texture(u_spec, vec2(fract(p.x*0.08), 0.5)).r;
+    vec3 base = palette(terrH(p.xz)*1.5 + u_centroid + u_time*0.06);
+    col = base*(0.2+0.9*dif) + palette(u_time*0.15+0.3)*spec*0.5 + palette(u_time*0.1)*u_beat*0.3;
+    col *= exp(-t*0.07);   // distance fog
+  }
+  return col;
+}
+
 vec3 sceneById(float id, vec2 uv){
   if(id < 0.5)      return sceneFractal(uv);
   else if(id < 1.5) return sceneTunnel(uv);
   else if(id < 2.5) return scenePlasma(uv);
-  else              return sceneVortex(uv);
+  else if(id < 3.5) return sceneVortex(uv);
+  else              return sceneTerrain(uv);
 }
 
 void main(){
@@ -996,11 +1025,11 @@ function h2v(h){ return (h.replace('#','').match(/.{2}/g)||[]).map(x=>parseInt(x
 function syncColorInputs(){ const map={cpA:'a',cpB:'b',cpC:'c',cpD:'d'}; for(const id in map){ const el=document.getElementById(id); if(el) el.value=v2h(customPal[map[id]]); } }
 function syncPalEditor(){ const w=document.getElementById('palEdit'); if(!w) return; w.style.display = curStyle===4?'flex':'none'; if(curStyle===4) syncColorInputs(); }
 // persisted look settings (volume is persisted separately in its own handler)
-let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=3)?m:0; })();
+let curMode = (()=>{ const m=parseInt(localStorage.getItem('resomance_scene'),10); return (m>=0&&m<=4)?m:0; })();
 // per-scene palette memory: each scene remembers its own palette index (0..4)
 let scenePalette; (()=>{ try{ const a=JSON.parse(localStorage.getItem('resomance_scene_palette')||'null'); if(Array.isArray(a)) scenePalette=a.map(Number); }catch(e){}
   if(!scenePalette||!scenePalette.length){ const lg=parseFloat(localStorage.getItem('resomance_palette')); const v=(lg>=0&&lg<=4)?lg:0; scenePalette=[v,v,v,v]; }   // seed from the legacy global palette
-  while(scenePalette.length<4) scenePalette.push(0);
+  while(scenePalette.length<5) scenePalette.push(0);
   localStorage.setItem('resomance_scene_palette', JSON.stringify(scenePalette)); })();
 let curStyle = scenePalette[curMode]||0;
 let ringOn = localStorage.getItem('resomance_ring') !== '0';
@@ -1029,7 +1058,7 @@ function frame(now){
     if(!mixTrans && mixArmedAt===null && time>=autoMixNext) mixArmedAt=time;   // arm: hold for the next beat
     if(!mixTrans && mixArmedAt!==null){
       const armWait = (bpm>=40&&bpm<=200) ? Math.min(3.0, 2.2*60/bpm) : 3.0;   // fire on a beat, or fall back after ~2 beats (3s if no BPM)
-      if(beatPulse || time-mixArmedAt>=armWait){ const to=(curMode+1)%4; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; mixArmedAt=null; } }
+      if(beatPulse || time-mixArmedAt>=armWait){ const to=(curMode+1)%5; mixTrans={from:curMode,to,start:time}; modeA=curMode; modeB=to; mixArmedAt=null; } }
     if(mixTrans){ const k=Math.max(0,Math.min(1,(time-mixTrans.start)/AUTO_MIX_DUR)); blend=k;
       if(!mixTrans.palDone && k>=0.5){ mixTrans.palDone=true; applyScenePalette(mixTrans.to); }   // swap to the destination scene's palette at the crossfade midpoint
       if(k>=1){ curMode=mixTrans.to; modeA=modeB=curMode; blend=0; mixTrans=null; autoMixNext=time+AUTO_MIX_INTERVAL; applyModeUI(); } }
@@ -1296,7 +1325,7 @@ window.addEventListener('keydown', e=>{
     return;
   }
   if(e.shiftKey && e.code.startsWith('Digit')){ const n=parseInt(e.code.slice(5),10); if(n>=1&&n<=8){ e.preventDefault(); if(e.ctrlKey||e.metaKey) savePreset(n-1); else recallPreset(n-1); return; } }
-  if(e.key>='1'&&e.key<='4') setMode(parseInt(e.key,10)-1);
+  if(e.key>='1'&&e.key<='5') setMode(parseInt(e.key,10)-1);
   if(e.key==='r'||e.key==='R') setRing(!ringOn);
   if(e.key==='s'||e.key==='S') pendingShot=true;
   if(e.key==='f'||e.key==='F') toggleFullscreen();
