@@ -53,7 +53,7 @@ rough.
 ### Playback & library
 - [x] **A-B loop / cue points** — Let users mark in/out points to loop a section, plus drop per-track cue markers on the seek bar, for rehearsing or looping specific drops instead of whole-track linear playback. (effort: small)
 - [x] **Waveform overview scrubber** — Decode each track's PCM once and downsample it into a mini waveform drawn on the seek bar, so the bar shows the track's energy/structure (drops, breaks) instead of a bare progress line. (effort: medium)
-- [ ] **ID3 metadata + album-art palette tint** — Read ID3v2 tags (title/artist/artwork) from loaded files, surface them in the HUD, and optionally derive a palette from the cover art so the viz inherits the album's mood automatically. (effort: medium)
+- [x] **ID3 metadata + album-art palette tint** — Read ID3v2 tags (title/artist/artwork) from loaded files, surface them in the HUD, and optionally derive a palette from the cover art so the viz inherits the album's mood automatically. (effort: medium)
 - [ ] **Per-track look binding** — Tie a look preset (scene + palette + look + router) to a specific track or URL so loading it auto-recalls its intended visual, falling back to the global preset for unbound tracks. (effort: small)
 - [ ] **Crossfade between tracks** — Overlap the outgoing and incoming audio (and optionally crossfade the scene) on track change for seamless DJ-style transitions, instead of the current hard cut at `onTrackEnd`. (effort: medium)
 

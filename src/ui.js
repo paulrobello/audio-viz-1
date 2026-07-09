@@ -28,6 +28,7 @@ export function updateMeters(){
 // ---------- toast ----------
 const ui=document.getElementById('ui'), hintEl=document.getElementById('hint'), toastEl=document.getElementById('toast');
 let toastTimer=null;
+let artUrl=null;   // object URL of the currently-displayed album-art thumbnail (revoked on the next track)
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1400); }
 
 // ---------- fullscreen ----------
@@ -135,6 +136,14 @@ export function initUI(){
     else if (e.type === 'seekVisibility') showSeek(e.on);
     else if (e.type === 'seekMarks') renderSeekMarks();
     else if (e.type === 'wave') drawWave();
+    else if (e.type === 'meta') {
+      if (e.title || e.artist) document.getElementById('sub').textContent = e.artist ? (e.title + ' — ' + e.artist) : e.title;
+      const art = /** @type {HTMLImageElement | null} */ (document.getElementById('artImg'));
+      if (art) {
+        if (e.picture) { if (artUrl) URL.revokeObjectURL(artUrl); artUrl = URL.createObjectURL(new Blob([e.picture.bytes], { type: e.picture.mime || 'image/jpeg' })); art.src = artUrl; art.hidden = false; }
+        else { art.hidden = true; }
+      }
+    }
     else if (e.type === 'trackCount') updateTrackCounter();
     else if (e.type === 'toast') toast(e.msg);
     else if (e.type === 'fatal') fatal(e.msg);

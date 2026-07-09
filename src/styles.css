@@ -38,6 +38,9 @@
 
   #title { font-weight: 700; letter-spacing: .18em; font-size: 13px; color: #aebeff; }
   #sub { color: #8a96c8; font-size: 11px; letter-spacing: .04em; }
+  .titleRow { display: flex; align-items: center; gap: 10px; }
+  .artImg { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(150,180,255,.3); pointer-events: none; }
+  .artImg[hidden] { display: none; }
   .meter { display: inline-flex; gap: 3px; align-items: flex-end; height: 26px; }
   .meter i { width: 5px; background: linear-gradient(180deg,#6f8bff,#b76bff); border-radius: 2px; height: 2px; transition: height .05s linear; }
   .label { color:#7f8bc0; font-size:10px; letter-spacing:.12em; text-transform:uppercase; }

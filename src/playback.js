@@ -7,6 +7,7 @@
 import { audio, ensureCtx } from './audio.js';
 import { idbGetQueue, idbSaveQueue, idbSavePos, idbGetPos, idbGetAudio } from './storage.js';
 import { state, emit } from './state.js';
+import { parseId3 } from './id3.js';
 
 let srcNode = null, demoNodes = null, playing = true, isDemo = false;
 let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
@@ -123,6 +124,8 @@ function playFile(file, offset){
       setTrackName(file.name);
       seekVis(true);
       loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' }); emit('transport', { type:'wave' });   // reload this track's cues + reset A-B + repaint the waveform
+      const meta = parseId3(/** @type {ArrayBuffer} */ (reader.result));   // ID3v2 title/artist/artwork → HUD + (optional) album-art palette
+      if (meta) emit('transport', { type:'meta', title: meta.title, artist: meta.artist, picture: meta.picture ? { mime: meta.picture.mime, bytes: meta.picture.data } : null });
     }).catch(e=>{
       if(tok!==loadToken) return;
       toast('could not read '+file.name);

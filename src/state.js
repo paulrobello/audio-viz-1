@@ -62,6 +62,7 @@ export const state = {
   autoMixOn: localStorage.getItem('resomance_automix') === '1',
   beatShiftOn: localStorage.getItem('resomance_beatshift') === '1',
   autoGainOn: localStorage.getItem('resomance_autogain') !== '0',
+  artPaletteOn: localStorage.getItem('resomance_artpal') === '1',   // derive a Custom palette from loaded cover art
   showFps: localStorage.getItem('resomance_fps') === '1',
   shuffleOn: localStorage.getItem('resomance_shuffle') === '1',
   repeatMode: LS('resomance_repeat', 1, (n) => Number.isInteger(n) && n >= 0 && n <= 2),

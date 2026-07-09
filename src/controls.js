@@ -8,7 +8,7 @@
 // reformat. syncAllUI() pushes the full state object back into the DOM (and re-writes the
 // same localStorage keys) so preset recall + boot both paint every widget from state; it is
 // wired into state.js's applySnapshot via setSyncAllUI so a recalled preset refreshes UI.
-import { state, savePref, emit, snapshotLook, applySnapshot, setSyncAllUI } from './state.js';
+import { state, savePref, emit, on, snapshotLook, applySnapshot, setSyncAllUI } from './state.js';
 import { audio } from './audio.js';
 import * as pb from './playback.js';
 import { toggleHelp, toggleFullscreen, toggleHideKey, isHelpOpen, isSeekFocused, poke } from './ui.js';
@@ -31,6 +31,7 @@ const autohideChk = /** @type {HTMLInputElement} */ (document.getElementById('au
 const autoMixChk = /** @type {HTMLInputElement} */ (document.getElementById('autoMix'));
 const beatShiftChk = /** @type {HTMLInputElement} */ (document.getElementById('beatShift')), bpmVal = document.getElementById('bpmVal');
 const agcChk = /** @type {HTMLInputElement} */ (document.getElementById('agc'));
+const artPalChk = /** @type {HTMLInputElement} */ (document.getElementById('artPal'));
 const fpsChk = /** @type {HTMLInputElement} */ (document.getElementById('fpsChk')), fpsVal = document.getElementById('fpsVal');
 const volSlider = /** @type {HTMLInputElement} */ (document.getElementById('vol')), volLbl = document.getElementById('volLbl');
 const psSave = /** @type {HTMLInputElement} */ (document.getElementById('psSave'));
@@ -41,6 +42,38 @@ function v2h(v) { return '#' + v.map((x) => Math.max(0, Math.min(255, Math.round
 function h2v(h) { return (h.replace('#', '').match(/.{2}/g) || []).map((x) => parseInt(x, 16) / 255); }
 function syncColorInputs() { const map = { cpA: 'a', cpB: 'b', cpC: 'c', cpD: 'd' }; for (const id in map) { const el = /** @type {HTMLInputElement} */ (document.getElementById(id)); if (el) el.value = v2h(state.customPal[map[id]]); } }
 function syncPalEditor() { const w = document.getElementById('palEdit'); if (!w) return; w.style.display = state.curStyle === 4 ? 'flex' : 'none'; if (state.curStyle === 4) syncColorInputs(); }
+
+// derive a cosine-palette (a/b/c/d vectors) from cover-art pixels: baseline brightness from the
+// average color + phase offsets tinted to the most-saturated hue, so the viz inherits the art's mood.
+function derivePalette(data) {
+  let rs=0,gs=0,bs=0,n=0, bestSat=-1, bestHue=0;
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i]/255,g=data[i+1]/255,b=data[i+2]/255;
+    rs+=r; gs+=g; bs+=b; n++;
+    const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn,l=(mx+mn)/2;
+    if(d>0){ const s=d/((1-Math.abs(2*l-1))||1); let h=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4; if(h<0)h+=6; h/=6; if(s>bestSat){bestSat=s;bestHue=h;} }
+  }
+  const a=[(rs/n)||0.5,(gs/n)||0.5,(bs/n)||0.5].map((v)=>Math.max(0,Math.min(1, v*0.5+0.15)));
+  const dVec=[bestHue, bestHue+0.15, bestHue+0.3].map((v)=>v-Math.floor(v));
+  return { a, b:[0.5,0.5,0.5], c:[1,1,1], d:dVec };
+}
+// load the artwork, sample it, and apply the derived Custom palette to the current scene
+function applyArtPalette(mime, bytes) {
+  try {
+    const blob=new Blob([bytes], { type: mime || 'image/jpeg' });
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    img.onload=()=>{
+      try {
+        const cv=document.createElement('canvas'); cv.width=24; cv.height=24; const cx=cv.getContext('2d');
+        if(cx){ cx.drawImage(img,0,0,24,24); state.customPal=derivePalette(cx.getImageData(0,0,24,24).data); localStorage.setItem('resomance_custompal', JSON.stringify(state.customPal)); setStyle(4); syncColorInputs(); }
+      } catch(_) {} finally { URL.revokeObjectURL(url); }
+      emit('transport', { type:'toast', msg:'palette from album art' });
+    };
+    img.onerror=()=>URL.revokeObjectURL(url);
+    img.src=url;
+  } catch(_) {}
+}
 
 // ---------- scene segmented selector ----------
 export function applyModeUI() { [...modeSeg.children].forEach((x) => x.classList.toggle('on', parseInt(/** @type {HTMLElement} */ (x).dataset.mode, 10) === state.curMode)); }
@@ -99,6 +132,7 @@ export function syncAllUI() {
   autoMixChk.checked = state.autoMixOn; localStorage.setItem('resomance_automix', state.autoMixOn ? '1' : '0');
   beatShiftChk.checked = state.beatShiftOn; localStorage.setItem('resomance_beatshift', state.beatShiftOn ? '1' : '0'); if (!state.beatShiftOn) bpmVal.textContent = '--';
   agcChk.checked = state.autoGainOn; localStorage.setItem('resomance_autogain', state.autoGainOn ? '1' : '0');
+  artPalChk.checked = state.artPaletteOn; localStorage.setItem('resomance_artpal', state.artPaletteOn ? '1' : '0');
   fpsChk.checked = state.showFps; localStorage.setItem('resomance_fps', state.showFps ? '1' : '0'); if (!state.showFps) fpsVal.textContent = '';
   // quality seg highlight
   [...qualSeg.children].forEach((b) => b.classList.toggle('on', parseInt(/** @type {HTMLElement} */ (b).dataset.q, 10) === state.qualIdx));
@@ -191,6 +225,10 @@ export function initControls() {
   beatShiftChk.addEventListener('change', () => { state.beatShiftOn = beatShiftChk.checked; localStorage.setItem('resomance_beatshift', state.beatShiftOn ? '1' : '0'); if (!state.beatShiftOn) bpmVal.textContent = '--'; });
   // auto-gain
   agcChk.addEventListener('change', () => { state.autoGainOn = agcChk.checked; localStorage.setItem('resomance_autogain', state.autoGainOn ? '1' : '0'); });
+  // album-art palette: derive a Custom palette from loaded cover art
+  artPalChk.addEventListener('change', () => { state.artPaletteOn = artPalChk.checked; localStorage.setItem('resomance_artpal', state.artPaletteOn ? '1' : '0'); });
+  // ID3 meta → (optionally) derive a palette from the cover art
+  on('transport', (e) => { if (e.type === 'meta' && state.artPaletteOn && e.picture) applyArtPalette(e.picture.mime, e.picture.bytes); });
 
   // preset slot buttons (save when psSave checked, else recall)
   document.querySelectorAll('.ps').forEach((b) => b.addEventListener('click', () => { const btn = /** @type {HTMLElement} */ (b); const i = +btn.dataset.s - 1; if (psSave.checked) savePreset(i); else recallPreset(i); }));
