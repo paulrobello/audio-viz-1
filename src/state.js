@@ -13,6 +13,7 @@ const LS = (k, def, validate) => {
 
 // curMode/curStyle/scenePalette seeded from their current localStorage keys + validators.
 export const state = {
+  bootT0: performance.now(),   // single shared epoch for all frame/interval clocks (state.js evaluates first — every module imports it)
   curMode: LS('resomance_scene', 0, (n) => Number.isInteger(n) && n >= 0 && n <= 5),
   curStyle: 0, // set below from scenePalette
   scenePalette: (() => {

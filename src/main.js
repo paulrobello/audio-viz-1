@@ -1,8 +1,7 @@
-// @ts-nocheck — boot sequence + frame() orchestration only. Every configuration panel,
-// preset slot, input handler, and hotkey lives in controls.js (Task 9). The frame loop below
-// owns timing/fpsEMA, audio.analyze, beat→BPM/shock, palette-shift, the auto-mix crossfade
-// state machine (shared via state.*), and the renderFrame call. Task 10 will type-check this
-// file and remove this opt-out.
+// Boot sequence + frame() orchestration. Every configuration panel, preset slot, input
+// handler, and hotkey lives in controls.js. The frame loop below owns timing/fpsEMA,
+// audio.analyze, beat→BPM/shock, palette-shift, the auto-mix crossfade state machine
+// (shared via state.*), and the renderFrame call.
 import './styles.css';
 import { state } from './state.js';
 import { audio, analyze } from './audio.js';
@@ -34,11 +33,11 @@ window.addEventListener('beforeunload', pb.saveQueuePos);
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => (state.reducedMotion = e.matches));
 
 // ---------- RENDER LOOP ----------
-let t0 = performance.now(), lastUI = 0, lastFrame = 0, fpsEMA = 0;
+let lastUI = 0, lastFrame = 0, fpsEMA = 0;
 let bpm = 0, paletteShift = 0, prevBeat = 0, shockStart = -10; const beatTimes = [];   // beat-aware palette shift + shockwave origin
 let beatPulse = false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
 function frame(now) {
-  const time = (now - t0) / 1000;
+  const time = (now - state.bootT0) / 1000;   // shared epoch (state.bootT0) — same clock as controls.js auto-mix timer
   const dt = lastFrame ? now - lastFrame : 0; lastFrame = now;
   if (dt > 0) { const inst = 1000 / dt; fpsEMA = fpsEMA ? fpsEMA * 0.9 + inst * 0.1 : inst; }
   analyze(); resize();

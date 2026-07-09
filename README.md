@@ -14,13 +14,19 @@ outward from the camera on every beat.
 
 ## Run
 
-Open `index.html` in a Chromium browser (Chrome / Edge / Brave) on Apple Silicon
-for full GPU acceleration:
+Requires a Chromium browser (Chrome / Edge / Brave) on Apple Silicon for full GPU
+acceleration. WebGL2 is required.
 
-- Double-click `index.html`, **or**
-- Serve locally: `python3 -m http.server 8766` → http://localhost:8766/
+- **Dev** — `npm install && make dev` → http://localhost:5173/
+- **Build single-file PWA** — `make build` → `dist/index.html` (self-contained,
+  installable, offline)
+- **Preview the build** — `make preview` → http://localhost:4173/
+- **Quality gate** — `make checkall` (lint + typecheck + build)
 
-> WebGL2 is required. On macOS, Chrome/Edge give the best GPU performance.
+The app is now built by Vite from modular ES-module source under `src/` into a
+single self-contained `dist/index.html`. The old "double-click the raw file /
+zero dependencies" workflow is gone — there is a one-time `npm install` and a
+build step — but runtime behavior is unchanged.
 
 ## Use
 
@@ -53,8 +59,9 @@ frame (the 6th is a user-pasted shader compiled at runtime). Audio is captured w
 the Web Audio `AnalyserNode` (FFT 2048); bass / mid / treble bands, spectral
 centroid, and a bass-energy-flux beat detector feed shader uniforms. A GPU
 ping-pong framebuffer provides feedback trails, and a 256-bin R8 texture drives the
-spectrum ring. The whole thing is one self-contained `index.html` with no build
-step and no dependencies.
+spectrum ring. The whole thing is built by Vite from modular source under `src/` into a single
+self-contained `index.html` PWA — one file at runtime, no external network
+dependencies.
 
 ## License
 

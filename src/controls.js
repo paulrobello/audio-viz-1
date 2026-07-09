@@ -15,11 +15,9 @@ import { toggleHelp, toggleFullscreen, toggleHideKey, isHelpOpen, isSeekFocused,
 import { compileUserShader, requestScreenshot } from './render.js';
 import { setQuality } from './gl.js';
 
-// controls' own boot clock — used by setMode/autoMix to (re)arm the auto-mix interval timer.
-// Captured at module load (same app-start instant as main.js's frame clock); the sub-ms skew
-// is invisible on a 14 s timer, so autoMixNext stays in lock-step with frame()'s time base.
-const t0 = performance.now();
-function clockSec() { return (performance.now() - t0) / 1000; }
+// auto-mix interval clock — shares state.bootT0 (set in state.js, which loads first) so the
+// interval timer is provably on the same epoch as main.js's frame clock, not just empirically.
+function clockSec() { return (performance.now() - state.bootT0) / 1000; }
 
 // ---------- element refs (DOM is parsed before this module loads — same as ui.js) ----------
 const modeSeg = document.getElementById('modeSeg');
