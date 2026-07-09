@@ -10,6 +10,7 @@ uniform float u_treble;
 uniform float u_level;
 uniform float u_centroid;
 uniform float u_beat;
+uniform float u_beatPhase;   // bar-length beat-grid phase [0..1), downbeat at 0 (locked to BPM, soft-snapped to kick onsets)
 uniform float u_snare;
 uniform float u_hat;
 uniform float u_shock;   // 0 at the instant of a beat, rises to 1 as the shockwave expands/fades
@@ -281,6 +282,11 @@ void main(){
   // snare / hat onset accents (spectral-flux onsets) for richer reactivity
   col += palette(u_time*0.15 + 0.2) * u_snare * 0.10;
   col += palette(u_time*0.35 + 0.6) * u_hat   * 0.06;
+
+  // beat-phase downbeat accent: a bar-length phase that anticipates (phase→1) and pulses on (phase→0)
+  // the downbeat, so the field breathes with the grid even between detected onsets.
+  float _db = 1.0 - smoothstep(0.0, 0.14, min(u_beatPhase, 1.0 - u_beatPhase));
+  col += palette(u_time*0.12 + 0.7) * _db * (0.04 + u_bass*0.12 + u_beat*0.08) * (1.0 - 0.8*u_reducedMotion);
 
   // circular FFT spectrum ring overlay
   if(u_specOn > 0.5){

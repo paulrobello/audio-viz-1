@@ -36,6 +36,7 @@ window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',
 let lastUI = 0, lastFrame = 0, fpsEMA = 0;
 let bpm = 0, paletteShift = 0, prevBeat = 0, shockStart = -10; const beatTimes = [];   // beat-aware palette shift + shockwave origin
 let beatPulse = false;   // one-frame true when a new kick onset is detected (drives beat-synced auto-mix)
+let beatPhase = 0;       // bar-length beat-grid phase [0..1) locked to BPM, soft-snapped to kick onsets (exposed as u_beatPhase)
 function frame(now) {
   const time = (now - state.bootT0) / 1000;   // shared epoch (state.bootT0) — same clock as controls.js auto-mix timer
   const dt = lastFrame ? now - lastFrame : 0; lastFrame = now;
@@ -46,6 +47,11 @@ function frame(now) {
   if (audio.beat > prevBeat + 0.5) { beatPulse = true; beatTimes.push(time); shockStart = time; if (beatTimes.length > 12) beatTimes.shift();
     if (beatTimes.length >= 4) { const iv = []; for (let i = 1; i < beatTimes.length; i++) iv.push(beatTimes[i] - beatTimes[i - 1]); iv.sort((a, b) => a - b); const med = iv[Math.floor(iv.length / 2)]; if (med > 0.3 && med < 2.0) bpm = Math.round(60 / med); } }
   prevBeat = audio.beat;
+  // beat-grid phase: a bar-length phase [0..1) advanced at the BPM (each beat = 0.25; downbeat at 0),
+  // soft-snapped to detected kick onsets so scenes can anticipate the downbeat via u_beatPhase.
+  beatPhase += (dt / 1000) * ((bpm || 120) / 60) / 4;
+  if (beatPulse) { let err = Math.round(beatPhase * 4) / 4 - beatPhase; if (err > 0.125) err -= 0.25; else if (err < -0.125) err += 0.25; beatPhase += err * 0.35; }
+  beatPhase -= Math.floor(beatPhase);
   if (state.beatShiftOn) paletteShift += dt * 0.001 * ((bpm || 100) / 60 * 0.10 + audio.bands.level * 0.16);
   // auto-mix: arm at the interval, then fire the crossfade on the next beat (downbeat) so transitions feel musical.
   // modeA/modeB/blend/mixTrans/mixArmedAt/autoMixNext live in state (shared with controls.setMode + the autoMix toggle).
@@ -60,7 +66,7 @@ function frame(now) {
   }
 
   // render: spectrum upload + scene + bloom + composite + (optional) screenshot + ping-pong swap
-  renderFrame({ time, modeA: state.modeA, modeB: state.modeB, blend: state.blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active });
+  renderFrame({ time, beatPhase, modeA: state.modeA, modeB: state.modeB, blend: state.blend, paletteShift: state.beatShiftOn ? paletteShift : 0, shock: shockStart, camYaw: cam.yaw, camPitch: cam.pitch, camZoom: cam.zoom, orbitActive: cam.active });
 
   if (now - lastUI > 50) { lastUI = now; updateMeters(); updateSeek(); if (state.showFps) document.getElementById('fpsVal').textContent = Math.round(fpsEMA) + ' fps'; if (state.beatShiftOn && bpm) document.getElementById('bpmVal').textContent = bpm + ' bpm'; }
   requestAnimationFrame(frame);

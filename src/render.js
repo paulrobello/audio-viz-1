@@ -19,6 +19,7 @@ function buildSceneU(p) {
     bass: uni(p, 'u_bass'), mid: uni(p, 'u_mid'),
     treble: uni(p, 'u_treble'), level: uni(p, 'u_level'),
     centroid: uni(p, 'u_centroid'), beat: uni(p, 'u_beat'), shock: uni(p, 'u_shock'),
+    beatPhase: uni(p, 'u_beatPhase'),
     snare: uni(p, 'u_snare'), hat: uni(p, 'u_hat'),
     style: uni(p, 'u_style'), modeA: uni(p, 'u_modeA'), modeB: uni(p, 'u_modeB'), blend: uni(p, 'u_blend'),
     camYaw: uni(p, 'u_camYaw'), camPitch: uni(p, 'u_camPitch'), orbit: uni(p, 'u_orbit'), zoom: uni(p, 'u_zoom'),
@@ -58,6 +59,7 @@ export function initRender() {
 /**
  * @typedef {Object} RenderParams
  * @property {number} time - seconds since boot (t0)
+ * @property {number} beatPhase - bar-length beat-grid phase [0..1) locked to BPM (downbeat at 0)
  * @property {number} modeA - source scene index of the crossfade
  * @property {number} modeB - destination scene index of the crossfade
  * @property {number} blend - crossfade amount [0..1]
@@ -99,6 +101,7 @@ export function renderFrame(params) {
   gl.uniform1f(U.bass, audio.bands.bass); gl.uniform1f(U.mid, audio.bands.mid);
   gl.uniform1f(U.treble, audio.bands.treble); gl.uniform1f(U.level, audio.bands.level);
   gl.uniform1f(U.centroid, audio.bands.centroid); gl.uniform1f(U.beat, reducedMotion ? audio.beat * 0.2 : audio.beat);
+  gl.uniform1f(U.beatPhase, params.beatPhase);
   gl.uniform1f(U.shock, reducedMotion ? Math.min(1, (time - params.shock) / 0.6) * 0.15 : Math.min(1, (time - params.shock) / 0.6));
   gl.uniform1f(U.snare, reducedMotion ? audio.snare * 0.2 : audio.snare); gl.uniform1f(U.hat, reducedMotion ? audio.hat * 0.2 : audio.hat);
   gl.uniform1f(U.paletteShift, params.paletteShift);
