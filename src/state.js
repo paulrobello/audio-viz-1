@@ -55,8 +55,17 @@ export const state = {
   volume: (() => { const v = parseFloat(localStorage.getItem('resomance_vol')); return isNaN(v) ? 0.9 : v; })(),
   presets: (() => { try { const p = JSON.parse(localStorage.getItem('resomance_presets') ?? 'null'); return Array.isArray(p) ? p : []; } catch (_) { return []; } })(),
   reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  // --- non-persisted runtime fields: the auto-mix crossfade state machine. Shared
+  // between main.js's frame() (advances the crossfade each tick) and controls.js's
+  // setMode()/autoMix toggle (reset it). Not snapshotted, not persisted. ---
+  autoMixInterval: 14,
+  autoMixDur: 0.7,
+  modeA: 0, modeB: 0, blend: 0,
+  mixTrans: null, mixArmedAt: null, autoMixNext: 0,
 };
 state.curStyle = state.scenePalette[state.curMode] || 0;
+state.modeA = state.modeB = state.curMode;                 // both layers start on the current scene
+state.autoMixNext = state.autoMixOn ? state.autoMixInterval : 0;   // first auto-mix fires one interval after boot
 
 export const pref = LS; // alias used by readers that only need a value
 export function savePref(key, value) {
