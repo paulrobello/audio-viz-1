@@ -74,6 +74,21 @@ function applyArtPalette(mime, bytes) {
     img.src=url;
   } catch(_) {}
 }
+// tie the current look (scene + palette + look + router) to the current track/URL, or clear it
+function bindCurrentTrackLook() {
+  const key = pb.currentTrackKey();
+  if (!key) { emit('transport', { type:'toast', msg:'load a track first' }); return; }
+  state.trackBindings[key] = snapshotLook();
+  localStorage.setItem('resomance_track_bindings', JSON.stringify(state.trackBindings));
+  emit('transport', { type:'toast', msg:'look bound to track' });
+}
+function unbindCurrentTrackLook() {
+  const key = pb.currentTrackKey();
+  if (!key || !state.trackBindings[key]) { emit('transport', { type:'toast', msg:'no binding for this track' }); return; }
+  delete state.trackBindings[key];
+  localStorage.setItem('resomance_track_bindings', JSON.stringify(state.trackBindings));
+  emit('transport', { type:'toast', msg:'look unbound' });
+}
 
 // ---------- scene segmented selector ----------
 export function applyModeUI() { [...modeSeg.children].forEach((x) => x.classList.toggle('on', parseInt(/** @type {HTMLElement} */ (x).dataset.mode, 10) === state.curMode)); }
@@ -229,6 +244,8 @@ export function initControls() {
   artPalChk.addEventListener('change', () => { state.artPaletteOn = artPalChk.checked; localStorage.setItem('resomance_artpal', state.artPaletteOn ? '1' : '0'); });
   // ID3 meta → (optionally) derive a palette from the cover art
   on('transport', (e) => { if (e.type === 'meta' && state.artPaletteOn && e.picture) applyArtPalette(e.picture.mime, e.picture.bytes); });
+  // per-track look binding: auto-recall a bound look when a track/URL loads
+  on('transport', (e) => { if (e.type === 'trackLoaded' && e.key && state.trackBindings[e.key]) applySnapshot(state.trackBindings[e.key]); });
 
   // preset slot buttons (save when psSave checked, else recall)
   document.querySelectorAll('.ps').forEach((b) => b.addEventListener('click', () => { const btn = /** @type {HTMLElement} */ (b); const i = +btn.dataset.s - 1; if (psSave.checked) savePreset(i); else recallPreset(i); }));
@@ -255,6 +272,7 @@ export function initControls() {
     // A-B loop (A: set A → set B → clear) + cue points (M drop / Shift+M clear) on the seek bar
     if (e.key === 'a' || e.key === 'A') pb.setABPoint();
     if (e.key === 'm') pb.dropCue(); else if (e.key === 'M') pb.clearCues();
+    if (e.key === 'l') bindCurrentTrackLook(); else if (e.key === 'L') unbindCurrentTrackLook();
     poke();                                         // any other key counts as activity
   });
 

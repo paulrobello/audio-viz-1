@@ -63,6 +63,8 @@ export const state = {
   beatShiftOn: localStorage.getItem('resomance_beatshift') === '1',
   autoGainOn: localStorage.getItem('resomance_autogain') !== '0',
   artPaletteOn: localStorage.getItem('resomance_artpal') === '1',   // derive a Custom palette from loaded cover art
+  // per-track look bindings: { trackKey: snapshot } so loading a bound track auto-recalls its visual
+  trackBindings: (() => { try { const o = JSON.parse(localStorage.getItem('resomance_track_bindings') ?? '{}'); return o && typeof o === 'object' ? o : {}; } catch (_) { return {}; } })(),
   showFps: localStorage.getItem('resomance_fps') === '1',
   shuffleOn: localStorage.getItem('resomance_shuffle') === '1',
   repeatMode: LS('resomance_repeat', 1, (n) => Number.isInteger(n) && n >= 0 && n <= 2),
@@ -115,7 +117,7 @@ export function setSyncAllUI(fn) { _syncAllUI = fn; }
 export function applySnapshot(p) {
   state.scenePalette[p.mode] = p.style;
   state.curMode = p.mode;
-  Object.assign(state.look, p.look);
+  Object.assign(state.sceneLook[p.mode], p.look);   // recalled look → the recalled scene's per-scene slot (state.look repoints to it in syncAllUI)
   Object.assign(state.router, p.router);
   Object.assign(state.customPal, p.customPal);
   state.ringOn = p.ring;

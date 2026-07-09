@@ -16,6 +16,7 @@ let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek
 let curWave = null;   // downsampled peak-amplitude waveform [0..1] per bucket, for the seek-bar overview scrubber
 let abA = -1, abB = -1;   // A-B loop points in seconds (-1 = unset); armed when both >= 0 and abB > abA
 let curTrackName = '';    // current track name (per-track cue-map key)
+let curSourceKey = '';    // identity key for per-track look bindings (file name or URL)
 // per-track cue markers, persisted as { trackName: [seconds...] } so cues survive a reload
 const cueMap = (() => { try { const o = JSON.parse(localStorage.getItem('resomance_cues') ?? '{}'); return new Map(Array.isArray(o) ? [] : Object.entries(o)); } catch (_) { return new Map(); } })();
 let curCues = [];         // sorted cue positions (seconds) for the current track
@@ -68,6 +69,7 @@ function computeWave(buf){
   curWave=out;
 }
 export function getWave(){ return curWave; }
+export function currentTrackKey(){ return curSourceKey; }   // identity for per-track look bindings
 
 // ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
@@ -126,6 +128,7 @@ function playFile(file, offset){
       loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' }); emit('transport', { type:'wave' });   // reload this track's cues + reset A-B + repaint the waveform
       const meta = parseId3(/** @type {ArrayBuffer} */ (reader.result));   // ID3v2 title/artist/artwork → HUD + (optional) album-art palette
       if (meta) emit('transport', { type:'meta', title: meta.title, artist: meta.artist, picture: meta.picture ? { mime: meta.picture.mime, bytes: meta.picture.data } : null });
+      curSourceKey = file.name; emit('transport', { type:'trackLoaded', key: curSourceKey });   // per-track look binding recall
     }).catch(e=>{
       if(tok!==loadToken) return;
       toast('could not read '+file.name);
@@ -144,7 +147,7 @@ export function playUrl(url){
     audioEl.src=url; audioEl.loop=true;   // loop finite URLs; live streams ignore loop
     urlMes=audio.ctx.createMediaElementSource(audioEl); urlMes.connect(audio.analyser);
     urlAudio=audioEl; playlist=[]; curIdx=-1; curBuffer=null; trackDur=0;
-    audioEl.play().then(()=>{ playing=true; isDemo=false; playState(); setTrackName(url.length>52?url.slice(0,52)+'…':url); seekVis(false); trackCount(); })
+    audioEl.play().then(()=>{ playing=true; isDemo=false; playState(); setTrackName(url.length>52?url.slice(0,52)+'…':url); seekVis(false); trackCount(); curSourceKey=url; emit('transport', { type:'trackLoaded', key: curSourceKey }); })
       .catch(()=>{ toast('could not play URL'); stopSources(); });
   }catch(e){ toast('could not play URL'); }
 }
