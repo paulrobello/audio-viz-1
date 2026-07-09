@@ -25,7 +25,7 @@ UX/perf/integration. Effort is rough.
 - [ ] **Custom user-shader scene** — Add a 5th scene powered by user-pasted GLSL that receives the same audio uniforms (`u_bass`, `u_mid`, `u_treble`, `u_beat`, `u_snare`, `u_hat`, `palette()`), with compile-error reporting, so anyone can drop in their own fragment shader. (effort: large)
 - [ ] **Additional raymarched scene** — Add a new scene such as an audio-reactive particle galaxy or a scrolling frequency-bar terrain to expand the four current fields (Fractal/Tunnel/Plasma/Vortex) and give auto-mix more variety. (effort: large)
 - [ ] **Post-FX toggles (vignette / chromatic aberration / film grain)** — Extend the copy/tonemap pass with optional, beat-reactive vignette, chromatic aberration, and film-grain controls in the existing "look" panel for a graded, cinematic finish. (effort: medium)
-- [ ] **Per-scene palette memory** — Remember a separate palette choice per scene so switching scenes keeps each one's intended mood, rather than one global palette across all four. (effort: small)
+- [x] **Per-scene palette memory** — Remember a separate palette choice per scene so switching scenes keeps each one's intended mood, rather than one global palette across all four. (effort: small)
 
 ## Audio analysis & reactivity
 - [ ] **Auto-gain / reactivity calibration** — Normalize bass/mid/treble against a rolling loudness estimate so both quiet and loud tracks react at full range, instead of today's fixed thresholds under/over-triggering depending on the master level. (effort: medium)
