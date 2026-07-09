@@ -65,11 +65,25 @@ playBtn.addEventListener('click', () => pb.togglePlay());
 
 // ---------- seek bar (file playback only) ----------
 const seekRow=document.getElementById('seekRow'), seekEl=/** @type {HTMLInputElement} */(document.getElementById('seek')),
+      seekMarks=document.getElementById('seekMarks'),
       curTimeEl=document.getElementById('curTime'), totTimeEl=document.getElementById('totTime');
 let seeking=false;
 function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
   return (h>0? h+':'+String(m).padStart(2,'0') : String(m))+':'+String(sec).padStart(2,'0'); }
-function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on) totTimeEl.textContent=fmtTime(pb.getTrackDur()); }
+function showSeek(on){ seekRow.style.display = on?'flex':'none'; if(on){ totTimeEl.textContent=fmtTime(pb.getTrackDur()); renderSeekMarks(); } }
+// paint A-B loop points (gold) + per-track cue markers (cyan, click to jump) over the seek bar
+function renderSeekMarks(){
+  if(!seekMarks) return;
+  seekMarks.innerHTML='';
+  const dur=pb.getTrackDur(); if(!dur) return;
+  const mk=(frac, cls, cueFrac)=>{
+    const d=document.createElement('div'); d.className='seekMark '+cls; d.style.left=(Math.max(0,Math.min(1,frac))*100)+'%';
+    if(cls==='cue' && cueFrac!=null){ d.title=fmtTime(cueFrac*dur); d.addEventListener('click',(ev)=>{ ev.stopPropagation(); pb.seekTo(cueFrac); }); }
+    seekMarks.appendChild(d);
+  };
+  const ab=pb.getAB(); if(ab.a>=0) mk(ab.a/dur,'ab'); if(ab.b>=0) mk(ab.b/dur,'ab');
+  for(const c of pb.getCues()) mk(c/dur,'cue', c/dur);
+}
 export function updateSeek(){
   if(!pb.hasBuffer()||!audio.ctx||seeking) return;
   const el=pb.currentElapsed(), dur=pb.getTrackDur();
@@ -105,6 +119,7 @@ export function initUI(){
     if (e.type === 'playState') updatePlayBtn();
     else if (e.type === 'trackName') document.getElementById('sub').textContent = e.name;
     else if (e.type === 'seekVisibility') showSeek(e.on);
+    else if (e.type === 'seekMarks') renderSeekMarks();
     else if (e.type === 'trackCount') updateTrackCounter();
     else if (e.type === 'toast') toast(e.msg);
     else if (e.type === 'fatal') fatal(e.msg);

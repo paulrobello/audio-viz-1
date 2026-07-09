@@ -11,6 +11,11 @@ import { state, emit } from './state.js';
 let srcNode = null, demoNodes = null, playing = true, isDemo = false;
 let urlAudio = null, urlMes = null;   // <audio> + MediaElementSource for URL / live-stream playback
 let curBuffer = null, startCtxTime = 0, trackDur = 0;   // file transport / seek state
+let abA = -1, abB = -1;   // A-B loop points in seconds (-1 = unset); armed when both >= 0 and abB > abA
+let curTrackName = '';    // current track name (per-track cue-map key)
+// per-track cue markers, persisted as { trackName: [seconds...] } so cues survive a reload
+const cueMap = (() => { try { const o = JSON.parse(localStorage.getItem('resomance_cues') ?? '{}'); return new Map(Array.isArray(o) ? [] : Object.entries(o)); } catch (_) { return new Map(); } })();
+let curCues = [];         // sorted cue positions (seconds) for the current track
 let playlist = [], curIdx = -1, loadToken = 0, decodeFails = 0;   // queue for multi-file / folder loads
 let pendingRestore = null;   // {files, idx, pos} restored on first gesture
 
@@ -24,6 +29,32 @@ function trackCount(){ emit('transport', { type: 'trackCount' }); }
 
 export function currentElapsed(){ if(!curBuffer||!audio.ctx) return 0; return Math.max(0,(audio.ctx.currentTime-startCtxTime)%trackDur); }
 export function saveQueuePos(pos){ if(playlist.length<1||curIdx<0) return; idbSavePos({idx:curIdx, pos:(pos!=null?pos:currentElapsed())}); }
+
+// ---- A-B loop + per-track cue points (rehearse / loop a section instead of whole-track linear playback) ----
+function fmtT(s){ s=Math.max(0,Math.floor(s||0)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+function persistCues(){ try { const o={}; cueMap.forEach((v,k)=>{ if(v&&v.length) o[k]=v; }); localStorage.setItem('resomance_cues', JSON.stringify(o)); } catch(_){} }
+function loadCuesFor(name){ curTrackName=name; const arr=cueMap.get(name); curCues = Array.isArray(arr) ? [...arr].sort((a,b)=>a-b) : []; }
+// press A: first sets A (loop start), second sets B (loop end, arms), third clears
+export function setABPoint(){
+  if(!curBuffer){ toast('load a track first'); return; }
+  const el=currentElapsed();
+  if(abA<0){ abA=el; toast('A set @ '+fmtT(el)); }
+  else if(abB<0){ if(el<=abA){ toast('B must be after A'); } else { abB=el; toast('B set · A-B loop on'); } }
+  else { abA=abB=-1; toast('A-B loop off'); }
+  emit('transport', { type:'seekMarks' });
+}
+export function clearAB(){ abA=abB=-1; }
+export function getAB(){ return { a:abA, b:abB }; }
+// jump from B back to A when the loop is armed (called every frame from main.js)
+export function checkABLoop(){ if(abA>=0 && abB>=0 && curBuffer && currentElapsed()>=abB) seekTo(abA/trackDur); }
+// drop a cue marker at the current position (per-track, persisted)
+export function dropCue(){
+  if(!curBuffer){ toast('load a track first'); return; }
+  const el=currentElapsed(), f=Math.round(el*100)/100;
+  if(curCues.indexOf(f)<0){ curCues.push(f); curCues.sort((a,b)=>a-b); cueMap.set(curTrackName,[...curCues]); persistCues(); toast('cue @ '+fmtT(el)); emit('transport', { type:'seekMarks' }); }
+}
+export function clearCues(){ if(curCues.length){ curCues=[]; cueMap.delete(curTrackName); persistCues(); toast('cues cleared'); emit('transport', { type:'seekMarks' }); } }
+export function getCues(){ return curCues; }
 
 // ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
@@ -59,6 +90,7 @@ function playFile(file, offset){
       srcNode.start(0, off); playing=true; isDemo=false; playState();
       setTrackName(file.name);
       seekVis(true);
+      loadCuesFor(file.name); clearAB(); emit('transport', { type:'seekMarks' });   // reload this track's cues + reset any A-B loop
     }).catch(e=>{
       if(tok!==loadToken) return;
       toast('could not read '+file.name);

@@ -42,6 +42,7 @@ function frame(now) {
   const dt = lastFrame ? now - lastFrame : 0; lastFrame = now;
   if (dt > 0) { const inst = 1000 / dt; fpsEMA = fpsEMA ? fpsEMA * 0.9 + inst * 0.1 : inst; }
   analyze(); resize();
+  pb.checkABLoop();   // A-B loop: jump B→A when armed
   beatPulse = false;
   // beat-aware palette rotation: estimate BPM from kick onsets, advance the phase shift with tempo + energy
   if (audio.beat > prevBeat + 0.5) { beatPulse = true; beatTimes.push(time); shockStart = time; if (beatTimes.length > 12) beatTimes.shift();

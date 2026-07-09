@@ -213,6 +213,9 @@ export function initControls() {
     if (e.key === 'n' || e.key === 'N') cycleRouter('snare', e.shiftKey ? -1 : 1);
     if (e.key === 't' || e.key === 'T') cycleRouter('hat', e.shiftKey ? -1 : 1);
     if (e.key === 'b' || e.key === 'B') cycleRouter('bass', e.shiftKey ? -1 : 1);
+    // A-B loop (A: set A → set B → clear) + cue points (M drop / Shift+M clear) on the seek bar
+    if (e.key === 'a' || e.key === 'A') pb.setABPoint();
+    if (e.key === 'm') pb.dropCue(); else if (e.key === 'M') pb.clearCues();
     poke();                                         // any other key counts as activity
   });
 

@@ -93,6 +93,12 @@
   input[type=color]{ pointer-events:auto; width:26px; height:22px; padding:0; border:1px solid rgba(150,180,255,.35); border-radius:6px; background:none; cursor:pointer; }
   input[type=color]::-webkit-color-swatch-wrapper{ padding:1px; }
   input[type=color]::-webkit-color-swatch{ border:none; border-radius:5px; }
+  /* seek-bar A-B loop + cue markers (overlay on the seek range input) */
+  .seekWrap { position: relative; display: inline-flex; align-items: center; }
+  .seekMarks { position: absolute; left: 0; right: 0; top: 50%; height: 20px; transform: translateY(-50%); pointer-events: none; }
+  .seekMark { position: absolute; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); border-radius: 1px; }
+  .seekMark.ab { background: #ffd54a; box-shadow: 0 0 5px rgba(255,213,74,.85); }
+  .seekMark.cue { width: 3px; background: #5ad6ff; box-shadow: 0 0 5px rgba(90,214,255,.85); cursor: pointer; pointer-events: auto; }
 .chk { display:inline-flex; align-items:center; gap:6px; cursor:pointer; pointer-events:auto; font-size:11px; color:#cdd6ff; }
   .chk input { accent-color:#8a7bff; }
   /* mobile / touch: larger hit targets and a tighter, stacked HUD on small screens */
