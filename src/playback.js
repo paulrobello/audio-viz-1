@@ -25,6 +25,13 @@ const cueMap = (() => { try { const o = JSON.parse(localStorage.getItem('resoman
 let curCues = [];         // sorted cue positions (seconds) for the current track
 let playlist = [], curIdx = -1, loadToken = 0, decodeFails = 0;   // queue for multi-file / folder loads
 let pendingRestore = null;   // {files, idx, pos} restored on first gesture
+// restoreReady resolves once the async IndexedDB restore lookup below has finished. Created
+// synchronously (at module load) so onFirstGesture can always wait on it — this closes a race
+// where an early first gesture ran before the lookup set pendingRestore, started the demo, and
+// stranded the not-yet-loaded track (leaving "click to resume" with the gesture listener gone).
+let restoreReadyResolve = () => {};   // no-op default; the Promise executor below reassigns it synchronously
+const restoreReady = new Promise((r) => { restoreReadyResolve = () => r(undefined); });
+let firstGestureHandled = false;
 
 // ---- bus → view (replaces former direct calls to toast/fatal/setTrackName/updatePlayBtn/showSeek/updateTrackCounter) ----
 function toast(msg){ emit('transport', { type: 'toast', msg }); }
@@ -77,10 +84,12 @@ export function currentTrackKey(){ return curSourceKey; }   // identity for per-
 // ---- persist the full playlist queue + position across reloads (IndexedDB impls live in storage.js) ----
 // restore on load (no autoplay — browsers block audio without a gesture; resumes on first click)
 (async function(){
-  const q=await idbGetQueue();
-  if(q&&q.length){ const p=await idbGetPos(); const idx=(p&&p.idx>=0&&p.idx<q.length)?p.idx:0; pendingRestore={files:q, idx, pos:(p&&p.pos)||0}; setTrackName((q[idx].name||'track')+'  ·  click to resume'); return; }
-  const rec=await idbGetAudio();   // legacy single-track cache
-  if(rec&&rec.blob){ const f=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'}); pendingRestore={files:[f], idx:0, pos:0}; setTrackName(f.name+'  ·  click to resume'); }
+  try{
+    const q=await idbGetQueue();
+    if(q&&q.length){ const p=await idbGetPos(); const idx=(p&&p.idx>=0&&p.idx<q.length)?p.idx:0; pendingRestore={files:q, idx, pos:(p&&p.pos)||0}; setTrackName((q[idx].name||'track')+'  ·  click to resume'); return; }
+    const rec=await idbGetAudio();   // legacy single-track cache
+    if(rec&&rec.blob){ const f=new File([rec.blob], rec.name||'track', {type:rec.type||'audio/*'}); pendingRestore={files:[f], idx:0, pos:0}; setTrackName(f.name+'  ·  click to resume'); }
+  } finally { restoreReadyResolve(); }   // always signal completion so a waiting first gesture can act
 })();
 
 export function stopSources(){
@@ -294,10 +303,18 @@ export function togglePlay(){
   playState();
 }
 
-// first user gesture: resume the saved queue at its position, else start the demo (browsers require a gesture for audio)
+// first user gesture: resume the saved queue at its position, else start the demo (browsers require a gesture for audio).
+// The restore lookup is async, so unlock the AudioContext synchronously here to capture the user activation, then act
+// once the lookup has resolved (restoreReady). This way an early gesture no longer races ahead of the lookup: the
+// context is already running when the restored track loads a moment later, so it plays without a second click.
 export function onFirstGesture(){
-  if(pendingRestore){ const r=pendingRestore; pendingRestore=null; loadFiles(r.files, r.idx, r.pos, true); }   // restore the queue at the saved position (skipSave: just read it)
-  else startDemo();
+  if(firstGestureHandled) return;
+  firstGestureHandled = true;
+  ensureCtx();   // resume/create the AudioContext within the gesture; the deferred action below reuses the running context
+  restoreReady.then(() => {
+    if(pendingRestore){ const r=pendingRestore; pendingRestore=null; loadFiles(r.files, r.idx, r.pos, true); }   // restore the queue at the saved position (skipSave: just read it)
+    else startDemo();
+  });
 }
 
 // repeat button: apply the new repeatMode to the currently-playing buffer source's loop flag

@@ -125,7 +125,7 @@ export function renderFrame(params) {
   gl.viewport(0, 0, targets.BW, targets.BH);
   gl.useProgram(programs.bright);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
-  gl.uniform1i(UB.tex, 0); gl.uniform2f(UB.res, targets.W, targets.H); gl.uniform1f(UB.thresh, 0.6);
+  gl.uniform1i(UB.tex, 0); gl.uniform2f(UB.res, targets.W, targets.H); gl.uniform1f(UB.thresh, 0.8);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   // --- bloom: separable 9-tap Gaussian, two horizontal/vertical rounds ---
   gl.useProgram(programs.blur);
@@ -146,7 +146,7 @@ export function renderFrame(params) {
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets.texB);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets.bloomTexA);
   gl.uniform1i(UC.tex, 0); gl.uniform1i(UC.bloom, 1); gl.uniform2f(UC.res, targets.W, targets.H);
-  gl.uniform1f(UC.bloomAmt, 0.45 + (reducedMotion ? audio.beat * 0.2 : audio.beat * 1.1));
+  gl.uniform1f(UC.bloomAmt, 0.30 + (reducedMotion ? audio.beat * 0.15 : audio.beat * 0.55));
   gl.uniform1f(UC.vig, look.vig); gl.uniform1f(UC.ca, look.ca); gl.uniform1f(UC.grain, look.grain); gl.uniform1f(UC.beat, reducedMotion ? audio.beat * 0.2 : audio.beat); gl.uniform1f(UC.time, time);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   if (pendingShot) {

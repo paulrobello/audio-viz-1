@@ -17,6 +17,8 @@
     border: 1px solid rgba(140,170,255,.18); border-radius: 12px;
     padding: 12px 14px; color: #cdd6ff; font-size: 12px; line-height: 1.5;
     box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    /* never let a panel exceed the viewport (minus #ui's 18px padding each side); its rows wrap to fit */
+    max-width: calc(100vw - 36px);
   }
   button, label.btn {
     pointer-events: auto; cursor: pointer; user-select: none;

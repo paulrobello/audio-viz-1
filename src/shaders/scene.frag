@@ -94,7 +94,7 @@ vec3 sceneFractal(vec2 uv){
     if(i>=u_rmSteps) break;
     p = ro + rd*t;
     float d = map0(p);
-    glow += exp(-d*7.0) * (0.012 + u_level*0.05);
+    glow += exp(-d*7.0) * (0.007 + u_level*0.022);
     if(d < 0.0012){ hit = true; break; }
     t += d*0.9; steps += 1.0;
     if(t > 18.0) break;
@@ -108,13 +108,13 @@ vec3 sceneFractal(vec2 uv){
     float fre = pow(1.0-clamp(dot(n,-rd),0.0,1.0),3.0);
     float ao = 1.0 - steps/float(u_rmSteps);
     vec3 base = palette(u_centroid*0.6 + t*0.04 + u_time*0.04 + u_style*0.2);
-    col = base*(0.18+0.9*dif)*ao + fre*palette(u_time*0.1+0.5)*(0.6+u_treble*1.4) + base*0.15*u_beat;
+    col = base*(0.13+0.6*dif)*ao + fre*palette(u_time*0.1+0.5)*(0.32+u_treble*0.6) + base*0.10*u_beat;   // toned-down surface lighting
   } else {
     float r = length(uv);
     col = palette(u_centroid*0.5 + r*0.6 + u_time*0.03) * (0.04 + 0.10/(r+0.4)) * (0.4 + u_level);
     col += palette(u_time*0.05) * u_treble * 0.06;
   }
-  col += glow * palette(u_time*0.08 + 0.3) * (1.0 + u_bass*2.0);
+  col += glow * palette(u_time*0.08 + 0.3) * (0.32 + u_bass*0.5);   // accumulated glow — heavily dimmed so loud-bass close-ups don't wash to white
   return col;
 }
 
@@ -210,32 +210,43 @@ vec3 scenePlasma(vec2 uv){
                 fbm(st + 3.5*q + vec2(8.3,2.8) + 0.13*u_time + u_treble));
   float f = fbm(st + 3.5*r);
   vec3 c = palette(f*0.9 + u_centroid + u_bass*0.3 + u_style*0.15);
-  c *= 0.5 + 0.9*f;
-  c += (q.x*q.x) * 0.25 * palette(u_time*0.2);
-  c += u_beat * 0.25 * palette(f + u_time*0.3);
+  c *= 0.12 + 0.5*f;                                // dimmer base + a bit more contrast (same look, toned down)
+  c += (q.x*q.x) * 0.12 * palette(u_time*0.2);
+  c += u_beat * 0.14 * palette(f + u_time*0.3);
   return c;
 }
 
-// ---------- scene 3: spiral vortex ----------
+// ---------- scene 3: spiral vortex (energy maelstrom draining into a dark eye) ----------
 vec3 sceneVortex(vec2 uv){
   float r = length(uv);
   float a = atan(uv.y, uv.x);
-  a += r*(3.0 + u_bass*3.0) - u_time*0.6 + u_beat*2.0;
-  vec2 suv = vec2(cos(a), sin(a)) * r;
-  float n = fbm(suv*4.0 + u_time*0.25 + u_centroid*5.0);
-  float beams = 0.5 + 0.5*sin(a*8.0 + u_time*1.5 + u_beat*3.0);
-  vec3 c = palette(n + u_centroid + u_style*0.2) * (n*1.3 + 0.2);
-  c *= smoothstep(1.25, 0.05, r);
-  c += beams * 0.18 * palette(u_time*0.1);
-  c += u_treble * 0.4 * palette(r*2.0 + u_time*0.2);
-  return c * (0.7 + u_level*0.8);
+  // logarithmic swirl: wind the angle by log(r) so filaments spiral tightly into the eye; rotates over time
+  float swirl = a - (2.2 + u_bass*1.8)*log(r + 0.05) + u_time*0.5 + u_beat*1.2;
+
+  // turbulent energy streaming along the swirl (co-rotates and flows inward)
+  vec2 suv = vec2(cos(swirl), sin(swirl)) * pow(r, 0.8);
+  float n = fbm(suv*3.0 + vec2(u_time*0.4, 0.0) + u_centroid*2.0);
+  // sharp spiral filaments (ridged) broken up by the turbulence → distinct energy arms, not a smear
+  float fil = pow(0.5 + 0.5*sin(swirl*3.0 + n*3.0), 3.5);
+
+  // radial profile: dark eye/drain at the centre + fade at the rim → contrast and a real focal point
+  float eye   = smoothstep(0.0, 0.16, r);
+  float shell = eye * smoothstep(1.3, 0.15, r);
+
+  vec3 c = vec3(0.0);
+  c += palette(n*0.6 + 0.12*sin(swirl) + u_centroid + u_style*0.2) * (fil * (0.4 + n*0.7)) * shell;   // coloured energy filaments (sin(swirl) keeps colour continuous across the atan branch cut)
+  float ring = exp(-pow((r - 0.2)*7.0, 2.0));                                                    // hot accretion ring around the eye
+  c += ring * palette(u_time*0.15 + 0.4) * (0.35 + u_bass*0.8 + u_beat*1.2);                     // ...pulsing on bass/beat
+  c += pow(0.5 + 0.5*sin(swirl*3.0 + n*3.0), 10.0) * shell * palette(u_time*0.1 + 0.6) * u_treble * 0.7;   // treble sparkle on the ridges
+  c += palette(u_time*0.05) * (1.0 - eye) * 0.04 * (0.5 + u_bass);                               // faint ember in the eye (not a hard black disc)
+  return c * (0.55 + u_level*0.4);
 }
 
 // ---------- scene 4: audio-reactive scrolling frequency-bar terrain (raymarched heightmap) ----------
 float terrH(vec2 p){ return fbm(p*0.45)*0.35 + texture(u_spec, vec2(fract(p.x*0.08), 0.5)).r*0.9 + u_bass*0.35; }
 vec3 sceneTerrain(vec2 uv){
-  vec3 ro = vec3(0.0, 1.3, u_time*2.0);                 // fly forward over the terrain
-  vec3 rd = normalize(vec3(uv*1.1, 1.0) + vec3(0.0, -0.35, 0.0));   // look down at it
+  vec3 ro = vec3(0.0, 2.2, u_time*2.0);                 // fly forward, high enough to clear the audio-driven peaks so the ground doesn't loom
+  vec3 rd = normalize(vec3(uv*1.1, 1.0) + vec3(0.0, -0.12, 0.0));   // gentle downward tilt → horizon sits lower in the frame, more sky
   float t=0.0; bool hit=false; vec3 p=vec3(0.0);
   for(int i=0;i<120;i++){
     if(i>=u_rmSteps) break;
@@ -252,35 +263,71 @@ vec3 sceneTerrain(vec2 uv){
     float dif = clamp(dot(n, normalize(vec3(0.3,0.8,-0.4))),0.0,1.0);
     float spec = texture(u_spec, vec2(fract(p.x*0.08), 0.5)).r;
     vec3 base = palette(terrH(p.xz)*1.5 + u_centroid + u_time*0.06);
-    col = base*(0.2+0.9*dif) + palette(u_time*0.15+0.3)*spec*0.5 + palette(u_time*0.1)*u_beat*0.3;
-    col *= exp(-t*0.07);   // distance fog
+    col = base*(0.09+0.4*dif) + palette(u_time*0.15+0.3)*spec*0.26 + palette(u_time*0.1)*u_beat*0.15;   // toned-down lighting so it doesn't blow out
+    col *= exp(-t*0.10);   // distance fog (a touch heavier to keep the field from reading as a bright wall)
   }
   return col;
 }
 
-// ---------- scene 6: audio-reactive particle galaxy (procedural log-spiral star field, spectrum-driven) ----------
+// ---------- scene 6: audio-reactive spiral galaxy ----------
+// Two logarithmic spiral arms of blue-white stars wind out of a small warm core bulge, laced with
+// nebula gas and a dark dust lane, set on a field of background stars. The disk is inclined (a 3/4
+// tilt) and rotates rigidly with the music. Replaces the former 64-blob field.
 vec3 sceneGalaxy(vec2 uv){
-  vec2 p = uv; p *= rot(u_time*0.03 + u_mid*0.10);   // slow overall drift
-  float r = length(p);
-  float spec = texture(u_spec, vec2(fract(r*0.4 + u_time*0.10), 0.5)).r;   // spectrum read once, indexed by radius
-  vec3 col = exp(-r*4.0) * palette(0.2) * (0.4 + u_bass*1.6);              // glowing core, bass-reactive
-  const int N = 64;
-  for(int i=0;i<N;i++){
-    float fi = float(i);
-    float h1 = hash21(vec2(fi*1.37, 7.1));
-    float h2 = hash21(vec2(fi*2.83, 3.3));
-    float h3 = hash21(vec2(fi*5.11, 1.7));
-    float sr = 0.12 + h1*1.15;                                            // star radius from center
-    float arm = floor(h2*3.0);                                            // one of three spiral arms
-    float ang = sr*3.5 + arm*2.094 + h3*0.5 - u_time*(0.35 + u_mid*0.6)/(sr + 0.25);   // log spiral + differential rotation
-    vec2 sp = vec2(cos(ang), sin(ang)) * sr;
-    float d = length(p - sp);
-    float tw = 0.55 + 0.45*sin(u_time*3.0 + h1*40.0);                     // twinkle
-    col += exp(-d*d*200.0) * tw * palette(h1*0.6 + u_time*0.04) * (0.5 + spec*1.8 + u_treble*1.2 + u_beat*0.5);
+  vec3 col = vec3(0.0);
+
+  // background field stars: two density octaves in screen space, static behind the disk
+  for(int k=0;k<2;k++){
+    float sc = 42.0 + float(k)*74.0;
+    vec2 g = uv*sc; vec2 gi = floor(g), gf = fract(g)-0.5;
+    float h = hash21(gi + float(k)*57.0);
+    float tw = 0.5 + 0.5*sin(u_time*3.0 + h*99.0);
+    col += smoothstep(0.5, 0.0, length(gf)) * step(0.90, h) * tw * (0.12 + 0.4*h) * vec3(0.72,0.8,1.0);
   }
-  col += palette(u_time*0.10 + 0.3) * u_beat * 0.12 * exp(-r*1.8);        // beat flash
-  col *= 1.0 + u_level*0.3;
-  return col;
+
+  // disk coordinate: zoom out (leave dark margin for the star field), tilt the ellipse, then incline
+  vec2 p = uv * 1.9;
+  p *= rot(0.6);            // orient the ellipse's major axis
+  p.y /= 0.55;              // inclination: foreshorten Y into a tilted disk
+  float r = length(p);
+  float ang = atan(p.y, p.x);
+  // rigid rotation for animation + a gentle inner-faster differential (kept small so it winds, not rings)
+  float aRot = ang + u_time*(0.12 + u_mid*0.25) + 0.35/(r + 0.4) + u_beat*0.25;
+
+  // two-arm logarithmic spiral density, broken up by turbulent gas and carved by a dust lane
+  float w    = aRot + (2.6 + u_bass*0.6)*log(r + 0.06);   // log winding → arms spiral outward
+  float arm  = pow(0.5 + 0.5*cos(w*2.0), 5.0);            // two sharp grand-design arms
+  float rim  = smoothstep(1.15, 0.16, r);                 // outer fade
+  float gas  = fbm(vec2(cos(aRot), sin(aRot))*r*2.6 + u_time*0.05);
+  float dust = fbm(vec2(cos(aRot+2.0), sin(aRot+2.0))*r*3.2 + 7.0);
+  float density = arm * rim * (0.45 + 0.8*gas);
+  density *= mix(1.0, 0.25, smoothstep(0.40, 0.70, dust));  // dark dust lanes
+
+  // resolved stars riding the arms (co-rotate with the disk, concentrate on the density peaks)
+  float stars = 0.0;
+  vec2 sp = vec2(cos(aRot), sin(aRot))*r;
+  for(int k=0;k<2;k++){
+    float sc = 55.0 + float(k)*90.0;
+    vec2 g = sp*sc; vec2 gi = floor(g), gf = fract(g)-0.5;
+    float h = hash21(gi + float(k)*31.0);
+    float tw = 0.55 + 0.45*sin(u_time*5.0 + h*70.0);
+    stars += smoothstep(0.40, 0.0, length(gf)) * step(0.70, h) * tw * (0.4 + h);
+  }
+  stars *= arm * rim * (0.5 + 0.9*gas);
+
+  // colours: blue-white young stars in the arms, warm golden core, dim indigo/magenta gas
+  float spec   = texture(u_spec, vec2(fract(r*0.6), 0.5)).r;
+  vec3 armCol  = mix(vec3(0.45,0.6,1.0), palette(0.55 + gas*0.3 + u_centroid*0.3), 0.55);
+  vec3 gasCol  = palette(0.10 + gas*0.4 + u_time*0.03)*0.5;
+  vec3 coreCol = mix(vec3(1.0,0.82,0.5), palette(0.06), 0.35);
+
+  float core = exp(-r*r*40.0)*1.2 + exp(-r*6.0)*0.5;      // small bright bulge + a modest halo
+  col += coreCol * core * (0.9 + u_bass*1.3);             // bass swells the core
+  col += gasCol * density * (0.7 + u_treble*0.4);         // nebula gas bed
+  col += armCol * density * (0.45 + spec*1.0 + u_beat*0.3);   // spectrum-lit arm light
+  col += (armCol*0.5 + vec3(0.7,0.8,1.0)*0.5) * stars * (0.7 + u_treble*1.0);   // resolved stars, treble-sparkled
+  col += palette(0.3 + u_time*0.02) * exp(-r*2.5) * 0.04;     // faint halo
+  return col * (0.9 + u_level*0.2);
 }
 
 // ---------- scene 5: user-pasted shader (body replaced at runtime; compile errors reported in the UI) ----------
@@ -307,14 +354,22 @@ void main(){
   vec3 colA = sceneById(u_modeA, uv);
   vec3 col  = (u_blend <= 0.001) ? colA : mix(colA, sceneById(u_modeB, uv), u_blend);
 
+  // the beat accents below are added across the WHOLE frame, which strobes dark backgrounds (terrain
+  // sky, galaxy/tunnel/vortex space). Gate them by local scene brightness so only lit content reacts —
+  // fully-lit scenes (plasma/fractal) keep their full-frame breathe since their luminance stays high.
+  float accentMask = smoothstep(0.06, 0.30, dot(col, vec3(0.333)));
+  // galaxyOn (galaxy is the visible scene, crossfade-aware) heavily damps the feedback trail below.
+  float galaxyOn = (u_blend <= 0.001) ? step(5.5, u_modeA)
+                 : max(step(5.5, u_modeA) * (1.0 - u_blend), step(5.5, u_modeB) * u_blend);
+
   // snare / hat onset accents (spectral-flux onsets) for richer reactivity
-  col += palette(u_time*0.15 + 0.2) * u_snare * 0.10;
-  col += palette(u_time*0.35 + 0.6) * u_hat   * 0.06;
+  col += palette(u_time*0.15 + 0.2) * u_snare * 0.10 * accentMask;
+  col += palette(u_time*0.35 + 0.6) * u_hat   * 0.06 * accentMask;
 
   // beat-phase downbeat accent: a bar-length phase that anticipates (phase→1) and pulses on (phase→0)
   // the downbeat, so the field breathes with the grid even between detected onsets.
   float _db = 1.0 - smoothstep(0.0, 0.14, min(u_beatPhase, 1.0 - u_beatPhase));
-  col += palette(u_time*0.12 + 0.7 + u_key*0.0833) * _db * (0.04 + u_bass*0.12 + u_beat*0.08) * (1.0 - 0.8*u_reducedMotion);
+  col += palette(u_time*0.12 + 0.7 + u_key*0.0833) * _db * (0.04 + u_bass*0.12 + u_beat*0.08) * (1.0 - 0.8*u_reducedMotion) * accentMask;
 
   // circular FFT spectrum ring overlay
   if(u_specOn > 0.5){
@@ -332,11 +387,13 @@ void main(){
 
   // feedback trails (phosphor persistence + swirl); damped under reduced-motion
   float rm = u_reducedMotion;
+  // galaxyOn (computed above) also damps the trail + swirl heavily for the galaxy, so its crisp
+  // starfield doesn't smear into rotating streaks
   vec2 c = gl_FragCoord.xy / u_res - 0.5;
   float zoom = 1.0 - (0.0035 + u_bass*0.012);
-  float a = (u_swirl + u_beat*0.02 + u_mid*0.01) * (1.0 - 0.85*rm);
+  float a = (u_swirl + u_beat*0.02 + u_mid*0.01) * (1.0 - 0.85*rm) * mix(1.0, 0.12, galaxyOn);
   c *= rot(a) * zoom;
-  float decay = mix(u_feedback - u_beat*0.05, 0.15, rm);
+  float decay = mix(u_feedback - u_beat*0.05, 0.15, rm) * mix(1.0, 0.30, galaxyOn);
   vec3 trail = texture(u_prev, c + 0.5).rgb * decay;
   col = max(col, trail);
   col += trail * u_glow * (1.0 - rm);

@@ -45,8 +45,8 @@
     </div>
     <div class="panel">
       <div class="row" style="margin-bottom:9px;">
-        <label class="btn" for="file">⤓ Load audio</label>
-        <button id="demo">▶ Demo synth</button>
+        <label class="btn" for="file" title="Load one or more local audio files">⤓ Load audio</label>
+        <button id="demo" title="Play a built-in generated tune — no file needed">▶ Demo synth</button>
         <button id="mic" title="live microphone / line-in">🎤 Mic</button>
         <button id="play">⏸ Pause</button>
         <button id="prev" title="previous (←)">⏮</button>
@@ -69,34 +69,34 @@
         <span id="totTime" class="label" style="width:42px;">0:00</span>
       </div>
       <div class="row" style="margin-bottom:9px;">
-        <span class="label">scene</span>
+        <span class="label" title="the visual scene the audio drives (keys 1–7)">scene</span>
         <div class="seg" id="modeSeg">
-          <button data-mode="0" class="on">Fractal</button>
-          <button data-mode="1">Tunnel</button>
-          <button data-mode="2">Plasma</button>
-          <button data-mode="3">Vortex</button>
-          <button data-mode="4">Terrain</button>
-          <button data-mode="5">User</button>
-          <button data-mode="6">Galaxy</button>
+          <button data-mode="0" class="on" title="Kaleidoscopic 3D raymarched fractal">Fractal</button>
+          <button data-mode="1" title="Fly through an infinite hyperspace warp tunnel">Tunnel</button>
+          <button data-mode="2" title="Flowing liquid plasma / noise field">Plasma</button>
+          <button data-mode="3" title="Spiralling vortex with rotating beams">Vortex</button>
+          <button data-mode="4" title="Fly over a scrolling frequency-bar landscape">Terrain</button>
+          <button data-mode="5" title="Your own pasted GLSL scene (see ⊘ shader)">User</button>
+          <button data-mode="6" title="Tilted spiral galaxy: arms, core, dust, starfield">Galaxy</button>
         </div>
-        <label class="chk"><input type="checkbox" id="autoMix" /> auto-mix</label>
-        <label class="chk"><input type="checkbox" id="xfade" /> crossfade</label>
+        <label class="chk" title="Automatically crossfade to a different scene on a timer"><input type="checkbox" id="autoMix" /> auto-mix</label>
+        <label class="chk" title="Overlap and fade the visuals when switching tracks"><input type="checkbox" id="xfade" /> crossfade</label>
       </div>
       <div class="row" style="margin-bottom:9px;">
-        <span class="label">palette</span>
-        <select id="style">
+        <span class="label" title="colour scheme for the current scene (P to cycle)">palette</span>
+        <select id="style" title="Colour scheme for the current scene (P to cycle; Custom lets you pick colours below)">
           <option value="0">Aether</option>
           <option value="1">Plasma Tomb</option>
           <option value="2">Cold Circuit</option>
           <option value="3">Ember Bloom</option>
           <option value="4">Custom</option>
         </select>
-        <label class="chk"><input type="checkbox" id="ring" checked /> spectrum ring</label>
-        <label class="chk"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
-        <label class="chk"><input type="checkbox" id="beatShift" /> beat-shift <span id="bpmVal" class="label">--</span></label>
-        <span class="label">key <b id="keyVal" style="color:#cdd6ff;">–</b></span>
-        <label class="chk"><input type="checkbox" id="agc" /> auto-gain</label>
-        <label class="chk"><input type="checkbox" id="artPal" /> album-art palette</label>
+        <label class="chk" title="Circular FFT spectrum-analyser ring overlaid on the visual (R)"><input type="checkbox" id="ring" checked /> spectrum ring</label>
+        <label class="chk" title="Fade this control panel out after 10s of no mouse/key activity"><input type="checkbox" id="autohide" checked /> auto-hide HUD</label>
+        <label class="chk" title="Rotate the palette in time with the detected tempo (BPM shown alongside)"><input type="checkbox" id="beatShift" /> beat-shift <span id="bpmVal" class="label">--</span></label>
+        <span class="label" title="Estimated musical key of the audio">key <b id="keyVal" style="color:#cdd6ff;">–</b></span>
+        <label class="chk" title="Auto-normalise level so quiet and loud tracks react similarly"><input type="checkbox" id="agc" /> auto-gain</label>
+        <label class="chk" title="Derive a Custom palette from the track's cover art"><input type="checkbox" id="artPal" /> album-art palette</label>
       </div>
       <div id="palEdit" style="display:none; margin:6px 0 9px; gap:10px; align-items:center;">
         <span class="label">custom</span>
@@ -116,37 +116,37 @@
         </div>
       </div>
       <div class="row" style="margin-top:9px;">
-        <span class="label">quality</span>
-        <div class="seg" id="qualSeg">
-          <button data-q="0">Low</button>
-          <button data-q="1" class="on">Med</button>
-          <button data-q="2">High</button>
+        <span class="label" title="render resolution + raymarch detail — lower it if the frame rate drops">quality</span>
+        <div class="seg" id="qualSeg" title="Render resolution + raymarch detail — lower it if the frame rate drops">
+          <button data-q="0" title="Lowest resolution & detail — best performance">Low</button>
+          <button data-q="1" class="on" title="Balanced resolution & detail">Med</button>
+          <button data-q="2" title="Full resolution & detail — needs a fast GPU">High</button>
         </div>
-        <label class="chk"><input type="checkbox" id="fpsChk" /> fps <span id="fpsVal">--</span></label>
+        <label class="chk" title="Show the current frames-per-second"><input type="checkbox" id="fpsChk" /> fps <span id="fpsVal">--</span></label>
       </div>
       <div class="row" style="margin-top:9px;">
-        <button id="lookToggle">◐ look</button>
-        <button id="shaderToggle">⊘ shader</button>
+        <button id="lookToggle" title="Post-processing look: trails, glow, vignette, grain, and drum routing">◐ look</button>
+        <button id="shaderToggle" title="Paste your own GLSL scene body for the User scene">⊘ shader</button>
         <button id="recToggle" title="record video with audio (WebM)">⏺ Rec</button>
         <button id="projectToggle" title="open a clean projection window">⧉ Project</button>
       </div>
       <div id="lookPanel" style="display:none; flex-direction:column; gap:7px;">
-        <label class="chk">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
-        <label class="chk">swirl <input type="range" id="lkSwirl" min="0" max="0.02" step="0.0005" value="0.004" style="width:120px;"></label>
-        <label class="chk">glow <input type="range" id="lkGlow" min="0" max="0.3" step="0.005" value="0.06" style="width:120px;"></label>
-        <label class="chk">vignette <input type="range" id="lkVig" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
-        <label class="chk">chroma <input type="range" id="lkCa" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
-        <label class="chk">grain <input type="range" id="lkGrain" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
+        <label class="chk" title="Phosphor trail persistence — how long the previous frame smears into this one (higher = longer motion trails)">feedback <input type="range" id="lkFeedback" min="0" max="0.97" step="0.01" value="0.9" style="width:120px;"></label>
+        <label class="chk" title="Rotational drift of the feedback trails — spins the smear into a swirl">swirl <input type="range" id="lkSwirl" min="0" max="0.02" step="0.0005" value="0.004" style="width:120px;"></label>
+        <label class="chk" title="Additive bloom from the feedback trails — raise for a brighter, hazier glow">glow <input type="range" id="lkGlow" min="0" max="0.3" step="0.005" value="0.06" style="width:120px;"></label>
+        <label class="chk" title="Darken the frame edges to draw the eye to the centre">vignette <input type="range" id="lkVig" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
+        <label class="chk" title="Chromatic aberration — split the red/blue channels at the edges (lens look)">chroma <input type="range" id="lkCa" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
+        <label class="chk" title="Animated film-grain noise over the image">grain <input type="range" id="lkGrain" min="0" max="1" step="0.01" value="0" style="width:120px;"></label>
         <div class="row" style="gap:7px; flex-wrap:wrap; align-items:center;">
-          <span class="label">route</span>
-          <label class="chk">kick <select id="rtKick"></select></label>
-          <label class="chk">snare <select id="rtSnare"></select></label>
-          <label class="chk">hat <select id="rtHat"></select></label>
-          <label class="chk">bass <select id="rtBass"></select></label>
+          <span class="label" title="Map each detected drum hit to a look parameter it pulses (none / swirl / glow / feedback)">route</span>
+          <label class="chk" title="What the kick drum pulses (none / swirl / glow / feedback)">kick <select id="rtKick"></select></label>
+          <label class="chk" title="What the snare pulses (none / swirl / glow / feedback)">snare <select id="rtSnare"></select></label>
+          <label class="chk" title="What the hi-hat pulses (none / swirl / glow / feedback)">hat <select id="rtHat"></select></label>
+          <label class="chk" title="What the bass energy pulses (none / swirl / glow / feedback)">bass <select id="rtBass"></select></label>
         </div>
         <div class="row" style="gap:5px; flex-wrap:wrap; align-items:center;">
-          <span class="label">presets</span>
-          <label class="chk"><input type="checkbox" id="psSave"> save</label>
+          <span class="label" title="8 look snapshot slots — recall with Shift+1..8, save with Ctrl+Shift+1..8">presets</span>
+          <label class="chk" title="When checked, clicking a slot saves the current look into it; otherwise clicking recalls that slot"><input type="checkbox" id="psSave"> save</label>
           <button class="ps" data-s="1">1</button>
           <button class="ps" data-s="2">2</button>
           <button class="ps" data-s="3">3</button>
